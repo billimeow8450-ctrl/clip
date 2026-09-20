@@ -1,0 +1,15 @@
+{
+  "name": "clip-studio-ai",
+  "version": "1.0.0",
+  "description": "ClipStudio AI - MasterEngine 7.8 Video Automation & Clipping Platform",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "test": ".venv/bin/pytest backend/tests -v",
+    "start": "./run_studio.sh"
+  },
+  "keywords": ["ai", "video-editor", "clipper", "whisper", "quant-media"],
+  "author": "",
+  "license": "ISC"
+}

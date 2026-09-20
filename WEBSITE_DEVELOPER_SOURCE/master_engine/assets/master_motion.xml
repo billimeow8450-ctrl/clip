@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<master-motion version="5">
+  <profile id="xml_reference" smoothing-seconds="0.34" max-pan-pixels-per-second="560" />
+</master-motion>

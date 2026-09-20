@@ -1,0 +1,42 @@
+# Node & Vite
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.vite/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+
+# Environment configs (preserve examples)
+.env
+backend/.env
+!.env.example
+!backend/.env.example
+
+# Storage and Databases
+backend/data/*.db
+backend/data/*.db-journal
+backend/storage/uploads/*
+backend/storage/outputs/*
+!backend/data/.gitkeep
+!backend/storage/uploads/.gitkeep
+!backend/storage/outputs/.gitkeep
+
+# System & Editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

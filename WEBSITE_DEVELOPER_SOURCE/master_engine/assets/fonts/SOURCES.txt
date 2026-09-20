@@ -1,0 +1,21 @@
+Font assets retrieved from Google Fonts on 2026-09-01.
+Each family is distributed under its accompanying SIL Open Font License 1.1.
+No third-party commercial caption preset or proprietary engine is included.
+
+Montserrat variable upstream:
+https://github.com/google/fonts/blob/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf
+The included static 600, 700 and 800 instances were made with fontTools
+instantiateVariableFont, preserving names and license metadata. The source OFL
+notice is Montserrat-OFL.txt. No Reserved Font Name is declared in that notice.
+
+Anton regular:
+https://github.com/google/fonts/blob/main/ofl/anton/Anton-Regular.ttf
+
+Barlow Condensed bold and bold italic:
+https://github.com/google/fonts/tree/main/ofl/barlowcondensed
+
+DM Serif Display regular and italic:
+https://github.com/google/fonts/tree/main/ofl/dmserifdisplay
+
+DejaVu Sans Mono is requested from the host system and is not redistributed
+inside this package. Unknown scripts may use system Noto Sans/fallback fonts.

@@ -1,0 +1,148 @@
+PROJECT:
+Convert the existing Python Telegram media/editing backend into a website/SaaS.
+Do NOT rewrite the video engine from zero.
+
+PUBLIC WEBSITE FEATURES:
+
+1. AI CLIPPER
+- Upload video OR paste YouTube URL.
+- Analyze long video.
+- Generate/select viral clips.
+- Use existing transcript/analysis/editing logic.
+- Render vertical clips with existing Master Engine.
+- Show job progress.
+- Let user preview/download completed clips.
+
+2. AI VIDEO EDITOR
+
+A) FILE UPLOAD
+- User uploads normal MP4/MOV/video.
+- User can edit/process the full uploaded file using existing Master Engine.
+
+B) YOUTUBE LINK + TIMELINE
+- User pastes YouTube URL.
+- Backend first fetches metadata:
+  title
+  thumbnail
+  duration
+- Website then shows a horizontal timeline under the video.
+- Timeline must have draggable START and END handles.
+- User can drag handles forward/backward.
+- Display exact selected:
+  HH:MM:SS start
+  HH:MM:SS end
+  duration
+- Do NOT download the full YouTube video just to display the timeline.
+- When user presses "AI Edit", send:
+  youtube_url
+  start_seconds
+  end_seconds
+- Use existing media_transport range-first downloader.
+- Selected range then goes into existing Master Engine.
+- Preserve original audio speed/timing.
+- Return edited MP4.
+
+Example frontend flow:
+
+YouTube URL
+    ↓
+Load Video
+    ↓
+Thumbnail / Player
+    ↓
+0:00 ───────●================●────── 1:32:40
+             START            END
+    ↓
+Selected: 00:14:25 - 00:16:10
+    ↓
+AI EDIT
+
+3. TRANSCRIPT
+- File upload OR YouTube URL.
+- English transcript.
+- Urdu where existing backend supports it.
+- TXT / SRT / PDF where supported.
+- Show timestamped transcript in browser.
+- Download transcript.
+
+4. PROJECTS
+- User jobs/projects list.
+- queued
+- downloading
+- transcribing
+- analyzing
+- rendering
+- completed
+- failed
+- allow completed video/transcript download.
+
+IMPORTANT ARCHITECTURE:
+
+The current bot.py contains Telegram UI and processing orchestration mixed together.
+
+Do NOT make the website frontend call Telegram handlers.
+
+Extract/reuse processing logic behind a web API.
+
+Recommended structure:
+
+Frontend:
+React / Next.js
+
+Backend:
+Python FastAPI
+
+Workers:
+Python worker processes
+
+Queue:
+Redis + Celery/RQ/Dramatiq or equivalent
+
+Core engines to REUSE:
+master_engine/
+media_transport/
+viral_research_engine.py
+processing functions currently inside bot.py
+
+For large/long video jobs:
+HTTP API should create a job and return job_id.
+Rendering must run in a worker, not inside the HTTP request.
+
+Suggested API:
+
+POST /api/projects
+POST /api/upload
+POST /api/youtube/metadata
+POST /api/editor/file
+POST /api/editor/youtube
+POST /api/clipper
+POST /api/transcript
+
+GET /api/jobs/{job_id}
+GET /api/projects
+GET /api/projects/{id}
+GET /api/files/{id}
+
+YouTube editor request example:
+
+{
+  "url": "https://youtube.com/watch?v=...",
+  "start_seconds": 865.0,
+  "end_seconds": 970.0
+}
+
+SECURITY:
+
+NEVER commit:
+.env
+BOT_TOKEN
+API secrets
+YouTube cookies
+proxy credentials
+auth/runtime_auth.json
+database passwords
+
+The source package intentionally does NOT contain production secrets.
+
+Keep Telegram code as reference only.
+Website authentication, subscriptions, billing and frontend are NOT implemented in this source package.

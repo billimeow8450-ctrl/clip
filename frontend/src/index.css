@@ -1,0 +1,410 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* ==========================================================================
+   DESIGN SYSTEM & UI SPECIFICATION: CLEAN LIGHT THEME (ELECTRIC BLUE EDITION)
+   Crisp off-white canvas, pure white surfaces, electric royal blue (#0066FF).
+   ========================================================================== */
+
+@theme {
+  /* Canvas & Surfaces */
+  --color-canvas: #f4f7f8;
+  --color-surface: #ffffff;
+  --color-subtle: #eaf0f2;
+  --color-soft-blue: #eff6ff;
+  --color-soft-gold: #fbf6ec;
+
+  /* Borders & Dividers */
+  --color-line: #d4dee4;
+  --color-line-muted: #e2e8f0;
+  --color-line-focus: #0066ff;
+
+  /* Typography & Text */
+  --color-ink: #0f172a;
+  --color-ink-body: #1e293b;
+  --color-ink-muted: #526173;
+  --color-ink-dim: #64748b;
+
+  /* Brand Accents — Electric Royal Blue (#0066FF) */
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-300: #93c5fd;
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #0066ff;
+  --color-blue-600: #0052cc;
+  --color-blue-700: #1d4ed8;
+  --color-blue-800: #1e40af;
+  --color-blue-900: #1e3a8a;
+
+  /* Accent — Burnished Brass / Gold */
+  --color-gold-50: #fbf6ec;
+  --color-gold-100: #f4e9ce;
+  --color-gold-200: #ebd8ad;
+  --color-gold-300: #ddbd7a;
+  --color-gold-400: #c99a45;
+  --color-gold-500: #966915;
+  --color-gold-600: #78520d;
+
+  /* Fonts */
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Inter', monospace;
+
+  /* Shadows */
+  --shadow-card: 0 10px 30px -10px rgba(15, 23, 42, 0.04), 0 2px 6px -2px rgba(15, 23, 42, 0.02);
+  --shadow-card-hover: 0 16px 36px -12px rgba(15, 23, 42, 0.10), 0 2px 8px -2px rgba(15, 23, 42, 0.04);
+  --shadow-dropdown: 0 20px 40px -15px rgba(15, 23, 42, 0.12), 0 0 1px 1px rgba(15, 23, 42, 0.05);
+  --shadow-button: 0 9px 22px -10px rgba(0, 102, 255, 0.45);
+  --shadow-button-hover: 0 14px 28px -10px rgba(0, 102, 255, 0.55);
+}
+
+/* ==========================================================================
+   Base Layer
+   ========================================================================== */
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    color-scheme: light;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-canvas);
+    color: var(--color-ink-body);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.025em;
+    color: var(--color-ink);
+    text-wrap: balance;
+  }
+
+  .font-mono, code, kbd, .tabular-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: #f4f7f8; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  ::selection { background: rgba(0, 102, 255, 0.18); color: #0f172a; }
+}
+
+/* ==========================================================================
+   Layout helpers & Component Styles
+   ========================================================================== */
+
+.container-custom {
+  max-width: 1240px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+/* Subtle mesh grid background */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(49, 81, 107, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(49, 81, 107, 0.05) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Ethereal iridescent radiant mesh background matching reference image */
+.hero-mesh-bg {
+  position: relative;
+  background-color: #ffffff;
+  background-image:
+    radial-gradient(circle at 82% 14%, rgba(230, 205, 255, 0.72) 0%, rgba(254, 215, 240, 0.45) 30%, transparent 60%),
+    radial-gradient(circle at 12% 44%, rgba(99, 102, 241, 0.42) 0%, rgba(59, 130, 246, 0.28) 28%, rgba(147, 197, 253, 0.12) 50%, transparent 68%),
+    radial-gradient(circle at 50% 60%, rgba(255, 255, 255, 0.9) 0%, #ffffff 100%);
+}
+
+/* Radiant electric blue gradient text */
+.text-gradient {
+  background: linear-gradient(135deg, #0066ff 0%, #2563eb 45%, #0284c7 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Card */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-hover:hover {
+  border-color: var(--color-blue-500);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-2px);
+}
+
+/* Primary Electric Blue Button (Modeled after image 2) */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 24px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #0066ff 0%, #0052cc 100%);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: var(--shadow-button);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, background-color 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: -60% -30%;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.28) 50%, transparent 65%);
+  transform: translate3d(-100%, 0, 0) rotate(10deg);
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-button-hover);
+  background: linear-gradient(135deg, #005ce6 0%, #0047b3 100%);
+}
+
+.btn-primary:hover::before {
+  transform: translate3d(100%, 0, 0) rotate(10deg);
+}
+
+.btn-primary:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Secondary Button */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 9999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--color-line);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-secondary:hover {
+  background: var(--color-subtle);
+  border-color: #b5c7d3;
+  color: var(--color-ink);
+}
+
+.btn-secondary:active {
+  background: #dfe7eb;
+}
+
+/* Ghost Button */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-ghost:hover {
+  background: var(--color-subtle);
+  color: var(--color-ink);
+}
+
+/* Input field */
+.input-field {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-field::placeholder {
+  color: var(--color-ink-dim);
+}
+
+.input-field:focus {
+  border-color: var(--color-blue-500);
+  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.15);
+}
+
+/* Badges */
+.badge-blue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 9999px;
+  background: #eff6ff;
+  color: #0066ff;
+  border: 1px solid #bfdbfe;
+}
+
+.badge-gold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 9999px;
+  background: #fbf6ec;
+  color: #966915;
+  border: 1px solid #ebd8ad;
+}
+
+.badge-subtle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 9999px;
+  background: #eaf0f2;
+  color: #526173;
+  border: 1px solid #d4dee4;
+}
+
+/* Pulsing electric blue dot */
+@keyframes pulse-blue {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.92); }
+}
+
+.pulse-blue-dot {
+  animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Animations & Keyframes */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes floatSlow {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(18px, -18px) scale(1.06); }
+}
+
+@keyframes floatReverse {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-18px, 18px) scale(1.04); }
+}
+
+@keyframes scanLine {
+  0% { top: 5%; opacity: 0.1; }
+  50% { opacity: 0.9; }
+  100% { top: 90%; opacity: 0.1; }
+}
+
+@keyframes waveBar {
+  0%, 100% { height: 18%; }
+  50% { height: 95%; }
+}
+
+@keyframes wordPop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+@keyframes scrubProgress {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+@keyframes radarPing {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  70% { transform: scale(1.4); opacity: 0; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+.animate-fadeInUp { animation: fadeInUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.animate-fadeIn { animation: fadeIn 0.3s ease both; }
+.animate-marquee { display: flex; width: max-content; animation: marquee 32s linear infinite; }
+.animate-marquee:hover { animation-play-state: paused; }
+.animate-float-slow { animation: floatSlow 8s ease-in-out infinite; }
+.animate-float-reverse { animation: floatReverse 10s ease-in-out infinite; }
+.animate-scan-line { animation: scanLine 3s ease-in-out infinite; }
+.animate-wave-bar-1 { animation: waveBar 0.75s ease-in-out infinite; }
+.animate-wave-bar-2 { animation: waveBar 0.55s ease-in-out infinite 0.15s; }
+.animate-wave-bar-3 { animation: waveBar 0.85s ease-in-out infinite 0.3s; }
+.animate-wave-bar-4 { animation: waveBar 0.65s ease-in-out infinite 0.45s; }
+.animate-wave-bar-5 { animation: waveBar 1.05s ease-in-out infinite 0.2s; }
+.animate-word-pop { display: inline-block; animation: wordPop 1.5s ease-in-out infinite; }
+.animate-scrub { animation: scrubProgress 8s linear infinite; }
+.animate-radar-ping { animation: radarPing 2.2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

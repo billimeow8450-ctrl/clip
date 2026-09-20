@@ -1,0 +1,357 @@
+/* ==========================================================================
+   Clean Light Theme — CSS Design System & Color Tokens
+   Derived from design.md
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* --- 1. Surface & Background Colors --- */
+  --bg-canvas: #f4f7f8;         /* Canvas background: soft cool slate-tinted off-white */
+  --bg-surface: #ffffff;        /* Surface: pure white cards, containers, panels */
+  --bg-subtle: #eaf0f2;         /* Subtle: inputs, wells, nested secondary containers */
+  --bg-soft-teal: #edf5f3;      /* Tinted teal: active states, subtle highlights */
+  --bg-soft-gold: #fbf6ec;      /* Tinted gold: premium chips, active nav items */
+
+  /* --- 2. Border & Divider Colors --- */
+  --border-subtle: #d4dee4;     /* Crisp hairline border for cards, inputs, dividers */
+  --border-muted: #e2e8f0;      /* Secondary soft interior lines */
+  --border-focus: #0f766e;      /* Primary focus-visible outline ring */
+  --border-focus-gold: #966915; /* Secondary focus outline ring */
+
+  /* --- 3. Text & Typography Colors --- */
+  --text-primary: #0f172a;      /* Slate-900: High-contrast headings and primary titles */
+  --text-body: #1e293b;         /* Slate-800: Clean, legible body text */
+  --text-muted: #526173;        /* Slate-600: Descriptions, secondary labels, subheaders */
+  --text-dim: #64748b;          /* Slate-500: Micro-captions, timestamps, disabled text */
+  --text-on-accent: #ffffff;    /* White text on primary buttons */
+
+  /* --- 4. Brand & Accent Colors --- */
+  --accent-teal: #0f766e;       /* Teal-700: Primary brand & action color */
+  --accent-teal-hover: #115e59; /* Teal-800: Hover state for primary buttons */
+  --accent-teal-active: #134e4a;/* Teal-900: Active/pressed state */
+  --accent-gold: #966915;       /* Amber/Gold: High-value metrics, active indicators */
+  --accent-gold-hover: #78520d;
+
+  /* --- 5. Semantic Feedback Colors --- */
+  --color-success: #0f766e;
+  --color-success-bg: #edf5f3;
+  --color-success-border: #c4e3dc;
+
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+
+  --color-warning: #b45309;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fde68a;
+
+  --color-info: #0284c7;
+  --color-info-bg: #f0f9ff;
+  --color-info-border: #bae6fd;
+
+  /* --- 6. Typography Stacks --- */
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* --- 7. Radii --- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;             /* Tags, chips, inline badges */
+  --radius-md: 9px;             /* Buttons, inputs, search bars */
+  --radius-lg: 12px;            /* Cards, dropdowns, widgets */
+  --radius-xl: 18px;            /* Floating panels, major containers */
+  --radius-full: 9999px;
+
+  /* --- 8. Shadows --- */
+  --shadow-card: 0 10px 30px -10px rgba(15, 23, 42, 0.04), 0 2px 6px -2px rgba(15, 23, 42, 0.02);
+  --shadow-card-hover: 0 16px 36px -10px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.03);
+  --shadow-dropdown: 0 20px 40px -15px rgba(15, 23, 42, 0.12), 0 0 1px 1px rgba(15, 23, 42, 0.05);
+  --shadow-button: 0 9px 22px -12px rgba(15, 118, 110, 0.35);
+  --shadow-button-hover: 0 14px 28px -13px rgba(15, 118, 110, 0.45);
+}
+
+/* ==========================================================================
+   Base Elements
+   ========================================================================== */
+html, body {
+  background-color: var(--bg-canvas);
+  color: var(--text-body);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+a {
+  color: var(--accent-teal);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--accent-teal-hover);
+}
+
+::selection {
+  background: rgba(15, 118, 110, 0.18);
+  color: var(--text-primary);
+}
+
+/* ==========================================================================
+   Component Utility Classes
+   ========================================================================== */
+
+/* --- Primary Button --- */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #147a72 0%, var(--accent-teal) 100%);
+  color: var(--text-on-accent);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: var(--shadow-button);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  text-decoration: none;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: -60% -30%;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.28) 50%, transparent 65%);
+  transform: translate3d(-100%, 0, 0) rotate(10deg);
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-button-hover);
+}
+
+.btn-primary:hover::before {
+  transform: translate3d(100%, 0, 0) rotate(10deg);
+}
+
+.btn-primary:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.btn-primary:focus-visible {
+  outline: 2px solid var(--accent-gold);
+  outline-offset: 3px;
+}
+
+/* --- Secondary Button --- */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-subtle);
+  border-color: #b5c7d3;
+}
+
+.btn-secondary:active {
+  background: #dfe7eb;
+}
+
+.btn-secondary:focus-visible {
+  outline: 2px solid var(--accent-teal);
+  outline-offset: 3px;
+}
+
+/* --- Cards & Panels --- */
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.card-interactive:hover {
+  border-color: var(--accent-teal);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* --- Metric / Stat Widget --- */
+.card-kpi {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kpi-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.kpi-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+/* --- Form Input & Search --- */
+.input-field {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-field::placeholder {
+  color: var(--text-dim);
+}
+
+.input-field:focus {
+  border-color: var(--accent-teal);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+/* --- Keyboard Shortcut Tag --- */
+kbd, .kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  user-select: none;
+}
+
+/* --- Status Badges / Pills --- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+}
+
+.badge-success {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid var(--color-success-border);
+}
+
+.badge-gold {
+  background: var(--bg-soft-gold);
+  color: var(--accent-gold);
+  border: 1px solid #ebd8ad;
+}
+
+.badge-neutral {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.badge-danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger-border);
+}
+
+/* --- Data Tables --- */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+.table-custom {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.table-custom th {
+  background: var(--bg-subtle);
+  padding: 12px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.table-custom td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-muted);
+  color: var(--text-body);
+}
+
+.table-custom tr:last-child td {
+  border-bottom: none;
+}
+
+.table-custom tr:hover td {
+  background: #f8fafb;
+}
+
+.table-custom .numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
