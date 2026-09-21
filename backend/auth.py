@@ -80,13 +80,15 @@ def create_access_token(
 
 async def revoke_jti(jti: str, user_id: Any, expires_at: datetime) -> None:
     """Revoke a single JWT by id. Expired revocation rows are pruned opportunistically."""
-    now_iso = datetime.now(timezone.utc).isoformat()
+    from .database import adapt_timestamp
+
+    now = datetime.now(timezone.utc)
     async with await get_db() as db:
-        await db.execute("DELETE FROM revoked_tokens WHERE expires_at < ?", (now_iso,))
+        await db.execute("DELETE FROM revoked_tokens WHERE expires_at < ?", (adapt_timestamp(now),))
         await db.execute("DELETE FROM revoked_tokens WHERE jti = ?", (jti,))
         await db.execute(
             "INSERT INTO revoked_tokens (id, jti, user_id, expires_at) VALUES (?, ?, ?, ?)",
-            (f"rvk_{uuid.uuid4().hex[:16]}", jti, user_id, expires_at.isoformat()),
+            (f"rvk_{uuid.uuid4().hex[:16]}", jti, user_id, adapt_timestamp(expires_at)),
         )
         await db.commit()
 

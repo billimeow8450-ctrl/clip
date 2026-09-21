@@ -18,6 +18,18 @@ def is_postgres() -> bool:
     return bool(url and ("postgres://" in url or "postgresql://" in url))
 
 
+def adapt_timestamp(value: datetime) -> Any:
+    """Bind a datetime in the native type of the active dialect.
+
+    asyncpg requires real datetime objects for TIMESTAMPTZ columns (ISO strings
+    raise DataError); sqlite3 stores ISO-8601 TEXT. All values are timezone-aware
+    UTC, so the ISO strings compare correctly lexicographically in SQLite.
+    """
+    if is_postgres():
+        return value
+    return value.isoformat()
+
+
 def _convert_sqlite_to_pg_query(query: str) -> tuple[str, bool]:
     """Convert SQLite ``?`` placeholders to PostgreSQL ``$1, $2, ...`` and handle RETURNING id.
 

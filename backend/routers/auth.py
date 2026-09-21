@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
-from ..database import get_db
+from ..database import get_db, adapt_timestamp, _parse_db_timestamp
 from ..auth import (
     get_password_hash,
     verify_password,
@@ -235,7 +235,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request) -> Forgo
         # Generate 32-byte secure urlsafe token; delivered only by email.
         reset_token = secrets.token_urlsafe(32)
         reset_id = f"rst_{uuid.uuid4().hex[:10]}"
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+        expires_at = adapt_timestamp(datetime.now(timezone.utc) + timedelta(minutes=30))
 
         # Invalidate previous unused tokens for this user
         await db.execute(
@@ -248,7 +248,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request) -> Forgo
             INSERT INTO password_resets (id, user_id, token, expires_at, used)
             VALUES (?, ?, ?, ?, 0)
             """,
-            (reset_id, user_id, reset_token, expires_at.isoformat()),
+            (reset_id, user_id, reset_token, expires_at),
         )
         await db.commit()
 
@@ -290,15 +290,11 @@ async def reset_password(req: ResetPasswordRequest, request: Request) -> ResetPa
                 detail="Invalid or expired reset token. Please request a new one.",
             )
 
-        # Verify expiration
-        exp_str = reset_entry["expires_at"]
+        # Verify expiration (Postgres returns datetime, SQLite returns ISO str)
         try:
-            if isinstance(exp_str, str):
-                exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
-            else:
-                exp_dt = exp_str
-            if exp_dt.tzinfo is None:
-                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            exp_dt = _parse_db_timestamp(reset_entry["expires_at"])
+            if exp_dt is None:
+                raise ValueError("unparseable expires_at")
         except Exception:
             exp_dt = datetime.now(timezone.utc)
 
