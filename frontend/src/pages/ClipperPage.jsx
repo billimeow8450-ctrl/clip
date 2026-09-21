@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Scissors, Sparkles, Upload, Play, Download, CheckCircle2, Loader2, AlertCircle, Flame, Clock } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
-import { api } from '../api';
+import { api, resolveApiUrl } from '../api';
 
 export default function ClipperPage({ user, onRequireAuth }) {
   const [url, setUrl] = useState('');
@@ -305,7 +305,7 @@ export default function ClipperPage({ user, onRequireAuth }) {
                 </div>
 
                 <a
-                  href={clip.video_url}
+                  href={resolveApiUrl(clip.video_url)}
                   download={`clip_${idx + 1}.mp4`}
                   className="btn-primary w-full text-xs py-2 font-semibold flex items-center justify-center gap-1.5"
                 >

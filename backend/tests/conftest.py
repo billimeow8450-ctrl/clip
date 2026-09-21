@@ -14,6 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 
 # Force testing environment before importing backend modules
 os.environ["ENVIRONMENT"] = "development"
+os.environ["DATABASE_URL"] = ""  # Keep unit tests isolated in local temporary database
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-clip-studio-testing-32-bytes"
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:5173,http://127.0.0.1:5173"
 os.environ["MAX_LOGIN_ATTEMPTS_PER_MIN"] = "5"

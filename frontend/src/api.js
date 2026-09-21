@@ -1,4 +1,18 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+function normalizeApiBaseUrl(value) {
+  const raw = (value || '').trim().replace(/\/$/, '');
+  if (!raw) return 'http://localhost:8000';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+
+export function resolveApiUrl(path) {
+  if (!path) return '';
+  if (path === '#' || path.startsWith('blob:') || path.startsWith('data:')) return path;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
 
 function getAuthHeaders() {
   const token = localStorage.getItem('clip_auth_token');
@@ -10,7 +24,7 @@ function getAuthHeaders() {
 }
 
 async function request(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = resolveApiUrl(endpoint);
   const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
   
   if (options.body && !(options.body instanceof FormData) && typeof options.body === 'object') {
@@ -19,9 +33,18 @@ async function request(endpoint, options = {}) {
     delete headers['Content-Type'];
   }
 
-  const response = await fetch(url, { ...options, headers });
+  let response;
+  try {
+    response = await fetch(url, { ...options, headers });
+  } catch {
+    throw new Error('Cannot reach the Clip Studio API. Check that the backend is running.');
+  }
   
   if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('clip_auth_token');
+      localStorage.removeItem('clip_user');
+    }
     const errorData = await response.json().catch(() => ({ detail: 'An error occurred' }));
     throw new Error(errorData.detail || `Request failed with status ${response.status}`);
   }
@@ -49,6 +72,12 @@ export const api = {
     },
     async getMe() {
       return request('/api/auth/me');
+    },
+    async forgotPassword(email) {
+      return request('/api/auth/forgot-password', { method: 'POST', body: { email } });
+    },
+    async resetPassword(data) {
+      return request('/api/auth/reset-password', { method: 'POST', body: data });
     },
     logout() {
       localStorage.removeItem('clip_auth_token');

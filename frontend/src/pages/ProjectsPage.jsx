@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FolderKanban, Scissors, Download, Clock, AlertCircle, RefreshCw, Loader2, Sparkles, TrendingUp } from 'lucide-react';
-import { api } from '../api';
+import { api, resolveApiUrl } from '../api';
 
 export default function ProjectsPage({ user, onRequireAuth }) {
   const [jobs, setJobs] = useState([]);
@@ -146,7 +146,7 @@ export default function ProjectsPage({ user, onRequireAuth }) {
                       </span>
                       {job.result_data?.output_video && (
                         <a
-                          href={job.result_data.output_video}
+                          href={resolveApiUrl(job.result_data.output_video)}
                           download
                           className="btn-primary text-xs py-1.5 px-3.5 shadow-xs"
                         >

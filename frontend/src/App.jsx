@@ -3,11 +3,20 @@ import Navbar from './components/common/Navbar';
 import LandingPage from './pages/LandingPage';
 import ProjectsPage from './pages/ProjectsPage';
 import AuthPage from './pages/AuthPage';
+import ClipperPage from './pages/ClipperPage';
+import EditorPage from './pages/EditorPage';
+import TranscriberPage from './pages/TranscriberPage';
 import { api } from './api';
 import { Scissors, Zap, Shield, Sparkles } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('landing');
+  const validTabs = ['landing', 'clipper', 'editor', 'transcriber', 'projects'];
+  const readTabFromHash = () => {
+    const candidate = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+    return validTabs.includes(candidate) ? candidate : 'landing';
+  };
+
+  const [activeTab, setActiveTab] = useState(readTabFromHash);
   const [user, setUser] = useState(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
@@ -15,13 +24,26 @@ export default function App() {
     const stored = api.auth.getCurrentUser();
     if (stored) {
       setUser(stored);
+      api.auth.getMe().then(setUser).catch(() => setUser(null));
     }
+
+    const onHashChange = () => setActiveTab(readTabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  const navigate = (tab) => {
+    const nextTab = validTabs.includes(tab) ? tab : 'landing';
+    setActiveTab(nextTab);
+    const nextHash = nextTab === 'landing' ? '#/' : `#/${nextTab}`;
+    if (window.location.hash !== nextHash) window.location.hash = nextHash;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleLogout = () => {
     api.auth.logout();
     setUser(null);
-    setActiveTab('landing');
+    navigate('landing');
   };
 
   const handleAuthSuccess = (userData) => {
@@ -34,15 +56,33 @@ export default function App() {
       <div>
         <Navbar
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={navigate}
           user={user}
           onLogout={handleLogout}
           onOpenAuth={() => setShowAuthModal(true)}
         />
 
-        <main>
+        <main id="main-content">
           {activeTab === 'landing' && (
-            <LandingPage setActiveTab={setActiveTab} />
+            <LandingPage setActiveTab={navigate} />
+          )}
+
+          {activeTab === 'clipper' && (
+            <div className="container-custom pt-10">
+              <ClipperPage user={user} onRequireAuth={() => setShowAuthModal(true)} />
+            </div>
+          )}
+
+          {activeTab === 'editor' && (
+            <div className="container-custom pt-10">
+              <EditorPage user={user} onRequireAuth={() => setShowAuthModal(true)} />
+            </div>
+          )}
+
+          {activeTab === 'transcriber' && (
+            <div className="container-custom pt-10">
+              <TranscriberPage user={user} onRequireAuth={() => setShowAuthModal(true)} />
+            </div>
           )}
 
           {activeTab === 'projects' && (

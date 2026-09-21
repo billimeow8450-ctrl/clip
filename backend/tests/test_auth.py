@@ -119,3 +119,53 @@ async def test_rate_limiting_on_login(client: AsyncClient, auth_user, monkeypatc
     )
     assert res4.status_code == 429
     assert "too many" in res4.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_forgot_and_reset_password_flow(client: AsyncClient, auth_user):
+    """Verify complete password reset workflow from token generation to credential update."""
+    clear_rate_limits()
+
+    # 1. Request reset token
+    forgot_res = await client.post(
+        "/api/auth/forgot-password",
+        json={"email": auth_user["email"]},
+    )
+    assert forgot_res.status_code == 200
+    forgot_data = forgot_res.json()
+    assert "reset_token" in forgot_data
+    token = forgot_data["reset_token"]
+    assert token is not None
+
+    # 2. Reset password with new password
+    new_password = "BrandNewSecurePassword2026!"
+    reset_res = await client.post(
+        "/api/auth/reset-password",
+        json={"token": token, "new_password": new_password},
+    )
+    assert reset_res.status_code == 200
+    assert "successfully reset" in reset_res.json()["message"].lower()
+
+    # 3. Old password must now fail
+    old_login = await client.post(
+        "/api/auth/login",
+        json={"email_or_username": auth_user["email"], "password": auth_user["password"]},
+    )
+    assert old_login.status_code == 401
+
+    # 4. New password must succeed
+    new_login = await client.post(
+        "/api/auth/login",
+        json={"email_or_username": auth_user["email"], "password": new_password},
+    )
+    assert new_login.status_code == 200
+    assert "token" in new_login.json()
+
+    # 5. Reusing the same token must fail with 400
+    reuse_res = await client.post(
+        "/api/auth/reset-password",
+        json={"token": token, "new_password": "AnotherPassword123!"},
+    )
+    assert reuse_res.status_code == 400
+    assert "invalid or expired" in reuse_res.json()["detail"].lower()
+

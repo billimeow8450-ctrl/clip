@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Video, Upload, Sparkles, Scissors, Download, Loader2, AlertCircle, Play, CheckCircle2 } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
 import TimelineTrimmer from '../components/editor/TimelineTrimmer';
-import { api } from '../api';
+import { api, resolveApiUrl } from '../api';
 
 export default function EditorPage({ user, onRequireAuth }) {
   const [sourceType, setSourceType] = useState('youtube'); // 'youtube' or 'file'
@@ -394,7 +394,7 @@ export default function EditorPage({ user, onRequireAuth }) {
 
               <div className="pt-3">
                 <a
-                  href={result.output_video}
+                  href={resolveApiUrl(result.output_video)}
                   download="edited_clip.mp4"
                   className="btn-primary w-full text-xs py-2.5 font-semibold flex items-center justify-center gap-2"
                 >

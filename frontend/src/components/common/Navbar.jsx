@@ -1,14 +1,16 @@
 import React from 'react';
-import { Scissors, FolderKanban, LogOut, Flame, Sparkles, Zap } from 'lucide-react';
+import { Scissors, FolderKanban, LogOut, FileText, WandSparkles } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpenAuth }) {
   return (
-    <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100 transition-all">
-      <div className="container-custom h-20 flex items-center justify-between">
+    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-xl border-b border-slate-100 transition-all">
+      <div className="container-custom min-h-16 py-3 flex items-center justify-between gap-4">
         {/* Brand logo lockup matching reference logo style */}
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('landing')}
-          className="flex items-center gap-2.5 cursor-pointer select-none group"
+          className="flex items-center gap-2.5 cursor-pointer select-none group shrink-0"
+          aria-label="OpusPulse home"
         >
           <div className="w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
             <Scissors className="w-4 h-4 text-blue-400" />
@@ -21,35 +23,31 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpen
               AI 2.5
             </span>
           </div>
-        </div>
+        </button>
 
         {/* Center nav with active indicator */}
-        <nav className="hidden md:flex items-center gap-8">
-          <button
-            onClick={() => setActiveTab('landing')}
-            className="relative text-sm font-semibold text-slate-950 transition-colors py-1 cursor-pointer"
-          >
-            AI Clipper
-            <span className="absolute bottom-0 inset-x-0 h-0.5 bg-[#0066ff] rounded-full"></span>
-          </button>
-          <a
-            href="#studio"
-            className="text-sm font-medium text-slate-600 hover:text-slate-950 transition-colors"
-          >
-            Studio Showcase
-          </a>
-          <a
-            href="#features"
-            className="text-sm font-medium text-slate-600 hover:text-slate-950 transition-colors"
-          >
-            Features
-          </a>
-          <a
-            href="#formats"
-            className="text-sm font-medium text-slate-600 hover:text-slate-950 transition-colors"
-          >
-            Viral Formats
-          </a>
+        <nav className="hidden lg:flex items-center gap-1" aria-label="Primary navigation">
+          {[
+            { id: 'clipper', label: 'AI Clipper', icon: Scissors },
+            { id: 'editor', label: 'Video Editor', icon: WandSparkles },
+            { id: 'transcriber', label: 'Transcriber', icon: FileText },
+            { id: 'projects', label: 'Projects', icon: FolderKanban },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              aria-current={activeTab === id ? 'page' : undefined}
+              className={`min-h-11 px-3.5 rounded-full text-sm font-semibold transition-colors flex items-center gap-2 ${
+                activeTab === id
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-50'
+              }`}
+            >
+              <Icon className="w-4 h-4" aria-hidden="true" />
+              {label}
+            </button>
+          ))}
         </nav>
 
         {/* Right: Pill Auth & Free Trial Actions */}
@@ -61,11 +59,12 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpen
                 className="px-4 py-2 rounded-full border border-slate-200 text-xs sm:text-sm font-semibold text-slate-800 hover:bg-slate-50 transition-colors flex items-center gap-2"
               >
                 <span>{user.username}</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-[#0066ff]"></span>
+                <FolderKanban className="w-3.5 h-3.5 text-[#0066ff]" aria-hidden="true" />
               </button>
               <button
                 onClick={onLogout}
                 title="Sign Out"
+                aria-label="Sign out"
                 className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-rose-500 hover:border-rose-200 transition-colors"
               >
                 <LogOut className="w-4 h-4" />

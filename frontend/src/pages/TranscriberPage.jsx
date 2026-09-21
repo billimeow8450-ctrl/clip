@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Upload, Download, Search, Copy, Check, Sparkles, Loader2, AlertCircle } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
-import { api } from '../api';
+import { api, resolveApiUrl } from '../api';
 
 export default function TranscriberPage({ user, onRequireAuth }) {
   const [url, setUrl] = useState('');
@@ -297,7 +297,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
               </button>
 
               <a
-                href={result.export_files?.[exportFormat] || '#'}
+                href={resolveApiUrl(result.export_files?.[exportFormat] || '#')}
                 download
                 className="btn-primary min-h-[32px] text-xs py-1 px-3 flex items-center gap-1 font-semibold"
               >

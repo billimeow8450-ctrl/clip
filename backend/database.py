@@ -1,8 +1,8 @@
 import os
 import re
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import aiosqlite
 
 DB_DIR = Path(__file__).resolve().parent / "data"
 DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -95,7 +95,12 @@ class _PGDBContext:
             dsn = self.dsn
             if dsn.startswith("postgresql+asyncpg://"):
                 dsn = dsn.replace("postgresql+asyncpg://", "postgresql://")
-            _PG_POOL = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
+            _PG_POOL = await asyncpg.create_pool(
+                dsn=dsn,
+                min_size=1,
+                max_size=10,
+                statement_cache_size=0,
+            )
         self._conn = await _PG_POOL.acquire()
         return _PGConnectionWrapper(self._conn)
 
@@ -108,21 +113,53 @@ class _PGDBContext:
 class _DBContext:
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self._conn: Optional[aiosqlite.Connection] = None
+        self._conn: Optional[sqlite3.Connection] = None
 
     def __await__(self):
         async def _open():
             return self
         return _open().__await__()
 
-    async def __aenter__(self) -> aiosqlite.Connection:
-        self._conn = await aiosqlite.connect(self.db_path)
-        self._conn.row_factory = aiosqlite.Row
-        return self._conn
+    async def __aenter__(self) -> "_SQLiteConnectionWrapper":
+        # aiosqlite currently deadlocks on Python 3.14 in some environments.
+        # SQLite operations here are deliberately small, so a synchronous
+        # connection behind the existing async-shaped interface is reliable
+        # and keeps callers identical across SQLite and PostgreSQL.
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(self.db_path, timeout=30)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA foreign_keys=ON;")
+        self._conn.execute("PRAGMA busy_timeout=30000;")
+        return _SQLiteConnectionWrapper(self._conn)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._conn:
-            await self._conn.close()
+            if exc_type is not None:
+                self._conn.rollback()
+            self._conn.close()
+
+
+class _SQLiteCursor:
+    def __init__(self, cursor: sqlite3.Cursor):
+        self._cursor = cursor
+        self.lastrowid = cursor.lastrowid
+
+    async def fetchone(self) -> Optional[sqlite3.Row]:
+        return self._cursor.fetchone()
+
+    async def fetchall(self) -> List[sqlite3.Row]:
+        return self._cursor.fetchall()
+
+
+class _SQLiteConnectionWrapper:
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    async def execute(self, query: str, params: tuple = ()) -> _SQLiteCursor:
+        return _SQLiteCursor(self._conn.execute(query, params))
+
+    async def commit(self) -> None:
+        self._conn.commit()
 
 
 def get_db():
@@ -203,10 +240,21 @@ async def init_db() -> None:
                     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    id VARCHAR(100) PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token VARCHAR(255) UNIQUE NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
         return
 
     # Fallback to local SQLite
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA foreign_keys=ON;")
 
@@ -289,5 +337,17 @@ async def init_db() -> None:
             );
         """)
 
-        await db.commit()
+        # Password resets table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        """)
 
+        await db.commit()
