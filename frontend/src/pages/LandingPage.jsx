@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import confetti from 'canvas-confetti';
 import {
-  Sparkles, Scissors, Play, Download, CheckCircle2, Flame, Zap, Upload,
-  ArrowRight, Share2, HelpCircle, ChevronDown, Check, Loader2, Star,
-  TrendingUp, Users, Shield, Wand2, Captions, Quote, Video, Eye,
-  Sliders, MessageSquare, Award, Clock, ArrowUpRight, CheckCircle, Search
+  Sparkles, Scissors, Play, Download, CheckCircle2, Zap, Upload,
+  ArrowRight, Share2, ChevronDown, Loader2, TrendingUp, Users, Eye,
+  Captions, Sliders, Clock, Info
 } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
 import { api } from '../api';
+import { useJobPolling } from '../hooks/useJobPolling';
 
 const sampleClips = [
   {
@@ -97,28 +97,16 @@ const sampleClips = [
   }
 ];
 
-export default function LandingPage({ setActiveTab }) {
+export default function LandingPage({ setActiveTab, onOpenAuth }) {
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [activeJob, setActiveJob] = useState(null);
   const [clips, setClips] = useState(sampleClips);
   const [activeFilter, setActiveFilter] = useState('all');
   const [error, setError] = useState('');
+  const [simNotice, setSimNotice] = useState(false);
   const [openFaq, setOpenFaq] = useState(null);
   const [selectedClip, setSelectedClip] = useState(null);
-  const [emailInput, setEmailInput] = useState('');
-  const [emailSuccess, setEmailSuccess] = useState(false);
-
-  const creatorLogos = [
-    { name: 'SPOTIFY STUDIOS', icon: <Sparkles className="w-4 h-4 text-[#0066ff]" /> },
-    { name: 'RED BULL MEDIA', icon: <Flame className="w-4 h-4 text-rose-600" /> },
-    { name: 'HUBSPOT CREATOR', icon: <Zap className="w-4 h-4 text-amber-600" /> },
-    { name: 'Y COMBINATOR', icon: <Award className="w-4 h-4 text-[#0066ff]" /> },
-    { name: 'GARYVEE TEAM', icon: <Users className="w-4 h-4 text-sky-600" /> },
-    { name: 'ALL-IN PODCAST', icon: <TrendingUp className="w-4 h-4 text-blue-700" /> },
-    { name: 'THE DIARY OF A CEO', icon: <Star className="w-4 h-4 text-amber-500" /> },
-  ];
 
   const demoPresets = [
     { label: '🧠 Huberman Dopamine', url: 'https://www.youtube.com/watch?v=QmOF0crdyRU', title: 'Huberman Lab: Dopamine & Motivation' },
@@ -140,32 +128,25 @@ export default function LandingPage({ setActiveTab }) {
     }
   };
 
-  useEffect(() => {
-    let timer = null;
-    if (activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed') {
-      timer = setInterval(async () => {
-        try {
-          const res = await api.jobs.get(activeJob.id);
-          setActiveJob(res);
-          if (res.status === 'completed') {
-            if (res.result_data?.clips && res.result_data.clips.length > 0) {
-              setClips(res.result_data.clips);
-            }
-            triggerCelebration();
-            setLoading(false);
-            const el = document.getElementById('studio');
-            if (el) el.scrollIntoView({ behavior: 'smooth' });
-          } else if (res.status === 'failed') {
-            setError(res.error_message || 'Clipper processing failed.');
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      }, 1200);
+  const handleJobFinished = (res) => {
+    if (res.status === 'completed') {
+      if (res.result_data?.clips && res.result_data.clips.length > 0) {
+        setClips(res.result_data.clips);
+      }
+      setSimNotice(Boolean(res.result_data?.is_simulation));
+      triggerCelebration();
+      setLoading(false);
+      const el = document.getElementById('studio');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      setError(res.error_message || 'Clipper processing failed.');
+      setLoading(false);
+      const el = document.getElementById('clipper-error');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
     }
-    return () => clearInterval(timer);
-  }, [activeJob]);
+  };
+
+  const { activeJob, startPolling } = useJobPolling(handleJobFinished);
 
   const handleGenerateClips = async (overrideUrl) => {
     setError('');
@@ -177,6 +158,15 @@ export default function LandingPage({ setActiveTab }) {
     }
 
     triggerCelebration();
+
+    // Authentication is required up front — the old auto-created guest
+    // account with a hardcoded password was removed (finding C5).
+    if (!api.auth.getCurrentUser()) {
+      setError('Please sign in or create a free account to generate clips.');
+      onOpenAuth?.();
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -185,21 +175,8 @@ export default function LandingPage({ setActiveTab }) {
 
       if (file && !targetUrl) {
         const uploadRes = await api.files.upload(file);
-        finalUrl = uploadRes.url;
+        finalUrl = uploadRes.url_base || uploadRes.url;
         title = file.name;
-      }
-
-      const currentUser = api.auth.getCurrentUser();
-      if (!currentUser) {
-        try {
-          await api.auth.register({
-            email: `guest_${Date.now()}@opuspulse.demo`,
-            username: `creator_${Math.floor(Math.random() * 10000)}`,
-            password: 'guestpassword123',
-          });
-        } catch {
-          /* ignore duplicate guest */
-        }
       }
 
       const res = await api.clipper.process({
@@ -209,7 +186,7 @@ export default function LandingPage({ setActiveTab }) {
         target_duration: '60',
       });
 
-      setActiveJob({
+      startPolling({
         id: res.job_id,
         status: 'queued',
         progress: 10,
@@ -241,7 +218,7 @@ export default function LandingPage({ setActiveTab }) {
 
           {/* Subtitle */}
           <p className="animate-fadeInUp text-base sm:text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed mb-10 font-normal">
-            Transform podcasts, YouTube streams, and interviews into 10 ready-to-publish viral shorts effortlessly with the power of artificial intelligence.
+            Transform podcasts, YouTube streams, and interviews into ready-to-publish vertical shorts with AI-powered highlight detection.
           </p>
 
           {/* Floating Capsule Input Console (The Clipper Engine) */}
@@ -249,10 +226,11 @@ export default function LandingPage({ setActiveTab }) {
             <div className="flex items-center gap-3 w-full">
               <YoutubeIcon className="w-6 h-6 text-rose-500 shrink-0" />
               <input
+                aria-label="Video link"
                 type="url"
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setFile(null); }}
-                placeholder="Paste YouTube, Rumble, Zoom, or Twitch video link..."
+                placeholder="Paste a YouTube, Vimeo, Twitch, or Rumble link..."
                 className="w-full bg-transparent border-0 text-slate-900 placeholder:text-slate-400 text-sm sm:text-base focus:ring-0 focus:outline-none py-2 font-medium"
               />
             </div>
@@ -287,8 +265,8 @@ export default function LandingPage({ setActiveTab }) {
                 </>
               ) : (
                 <>
-                  <Zap className="w-4 h-4 fill-white" />
-                  <span>Get 10 Viral Clips</span>
+                <Zap className="w-4 h-4 fill-white" />
+                <span>Get Viral Clips</span>
                 </>
               )}
             </button>
@@ -312,31 +290,25 @@ export default function LandingPage({ setActiveTab }) {
             ))}
             <div className="px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#0066ff] pulse-blue-dot"></span>
-              <span>75 Mins Available Free</span>
+              <span>Free tier available — no credit card required</span>
             </div>
           </div>
 
           {/* Trusted Creator Networks Bar */}
           <div className="border-t border-slate-100/90 pt-10 max-w-4xl mx-auto">
             <p className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-5">
-              Trusted by 850,000+ top creators, podcast networks & digital agencies
+              Built for creators, podcast networks & digital agencies
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-14 text-slate-600">
-              <div className="flex items-center gap-2 font-bold text-sm hover:text-slate-950 transition-colors">
-                <Sparkles className="w-4 h-4 text-[#0066ff]" /> <span>SPOTIFY STUDIOS</span>
-              </div>
-              <div className="flex items-center gap-2 font-bold text-sm hover:text-slate-950 transition-colors">
-                <Flame className="w-4 h-4 text-rose-500" /> <span>RED BULL MEDIA</span>
-              </div>
-              <div className="flex items-center gap-2 font-bold text-sm hover:text-slate-950 transition-colors">
-                <Zap className="w-4 h-4 text-amber-500" /> <span>HUBSPOT CREATOR</span>
-              </div>
-              <div className="flex items-center gap-2 font-bold text-sm hover:text-slate-950 transition-colors">
-                <Award className="w-4 h-4 text-[#0066ff]" /> <span>Y COMBINATOR</span>
-              </div>
-              <div className="flex items-center gap-2 font-bold text-sm hover:text-slate-950 transition-colors">
-                <Users className="w-4 h-4 text-sky-600" /> <span>GARYVEE TEAM</span>
-              </div>
+            <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm font-semibold text-slate-600">
+              <span>YouTube</span>
+              <span aria-hidden="true">•</span>
+              <span>Vimeo</span>
+              <span aria-hidden="true">•</span>
+              <span>Twitch</span>
+              <span aria-hidden="true">•</span>
+              <span>Rumble</span>
+              <span aria-hidden="true">•</span>
+              <span>Direct uploads</span>
             </div>
           </div>
         </div>
@@ -633,14 +605,14 @@ export default function LandingPage({ setActiveTab }) {
 
       {/* Error message */}
       {error && (
-        <div className="max-w-md mx-auto p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium animate-fadeIn">
+        <div id="clipper-error" className="max-w-md mx-auto p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium animate-fadeIn" role="alert">
           {error}
         </div>
       )}
 
-      {/* Live Progress Stages Tracker */}
-      {activeJob && (
-        <div className="max-w-3xl mx-auto p-6 rounded-2xl bg-white border border-blue-300 shadow-card animate-fadeIn text-left">
+      {/* Live Progress Stages Tracker (hidden once the job reaches a terminal state) */}
+      {activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed' && (
+        <div className="max-w-3xl mx-auto p-6 rounded-2xl bg-white border border-blue-300 shadow-card animate-fadeIn text-left" role="status" aria-live="polite">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center">
@@ -718,7 +690,7 @@ export default function LandingPage({ setActiveTab }) {
                     : 'bg-white text-ink-muted hover:text-ink border border-line'
                 }`}
               >
-                Virality Score 90+ (4)
+                Virality Score 90+ ({clips.filter((c) => (c.score || c.viral_score || 0) >= 90).length})
               </button>
               <button
                 onClick={() => setActiveFilter('monologue')}
@@ -742,6 +714,13 @@ export default function LandingPage({ setActiveTab }) {
               </button>
             </div>
           </div>
+
+          {simNotice && (
+            <div className="mb-6 p-3 rounded-xl bg-[#fffbeb] border border-[#fde68a] text-[#b45309] text-xs flex items-start gap-2" role="status">
+              <Info className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>Simulation mode: these clips are placeholders generated without processing your video. Enable ENABLE_HEAVY_RENDERING on the server for real results.</span>
+            </div>
+          )}
 
           {/* 9:16 Vertical Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -877,7 +856,7 @@ export default function LandingPage({ setActiveTab }) {
                       className="btn-primary text-xs py-1.5 px-3 font-semibold"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span>Export 4K</span>
+                      <span>{clip.download_url ? 'Export MP4' : 'Preview'}</span>
                     </a>
                   </div>
                 </div>
@@ -888,7 +867,7 @@ export default function LandingPage({ setActiveTab }) {
       </section>
 
       {/* ===================== CORE FEATURE BENTO GRID ===================== */}
-      <section className="py-20 relative" id="features">
+      <section className="py-20 relative" id="bento">
         <div className="container-custom">
           <div className="text-center max-w-3xl mx-auto mb-16">
             <div className="inline-flex items-center gap-2 text-gold-600 text-xs font-mono font-bold tracking-wider uppercase mb-3">
@@ -1058,109 +1037,79 @@ export default function LandingPage({ setActiveTab }) {
         </div>
       </section>
 
-      {/* ===================== SOCIAL PROOF & METRICS ===================== */}
+      {/* ===================== CAPABILITIES ===================== */}
       <section className="py-20 bg-white border-t border-line relative">
         <div className="container-custom">
-          {/* Counters */}
+          {/* Pipeline facts (replaces fabricated usage metrics — finding M8) */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 pb-16 border-b border-line">
             <div>
-              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">18.4M+</span>
-              <span className="block text-sm font-semibold text-blue-700 mt-1">Viral Clips Generated</span>
-              <span className="text-xs text-ink-dim mt-0.5 block">Across 120+ media niches</span>
+              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">9:16</span>
+              <span className="block text-sm font-semibold text-blue-700 mt-1">Vertical Auto-Reframe</span>
+              <span className="text-xs text-ink-dim mt-0.5 block">Speaker-aware cropping</span>
             </div>
             <div>
-              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">4.2B+</span>
-              <span className="block text-sm font-semibold text-gold-600 mt-1">Collective Views</span>
-              <span className="text-xs text-ink-dim mt-0.5 block">On TikTok & Shorts</span>
+              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">3-in-1</span>
+              <span className="block text-sm font-semibold text-gold-600 mt-1">AI Studio</span>
+              <span className="text-xs text-ink-dim mt-0.5 block">Clipper, Editor, Transcriber</span>
             </div>
             <div>
-              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">850K+</span>
-              <span className="block text-sm font-semibold text-blue-700 mt-1">Active Creators</span>
-              <span className="text-xs text-ink-dim mt-0.5 block">Agencies, teams & solo pros</span>
+              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">5+</span>
+              <span className="block text-sm font-semibold text-blue-700 mt-1">Source Platforms</span>
+              <span className="text-xs text-ink-dim mt-0.5 block">Or direct file uploads</span>
             </div>
             <div>
-              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">94%</span>
-              <span className="block text-sm font-semibold text-blue-800 mt-1">Time Saved per Video</span>
-              <span className="text-xs text-ink-dim mt-0.5 block">From 6 hours to 4 minutes</span>
+              <span className="font-display text-4xl sm:text-5xl font-extrabold text-ink tracking-tight">500MB</span>
+              <span className="block text-sm font-semibold text-blue-800 mt-1">Uploads per File</span>
+              <span className="text-xs text-ink-dim mt-0.5 block">MP4, MOV, MKV, MP3 & more</span>
             </div>
           </div>
 
-          {/* Creator Testimonials */}
+          {/* Workflow pillars (replaces fabricated testimonials — finding M8) */}
           <div className="pt-16">
             <div className="text-center max-w-2xl mx-auto mb-12">
               <h2 className="text-3xl font-display font-bold text-ink mb-3">
-                Loved by Elite Creators & Media Agencies
+                Built for the Short-Form Workflow
               </h2>
               <p className="text-sm sm:text-base text-ink-muted">
-                Here is how modern content teams dominate short-form feeds effortlessly.
+                Everything in the studio is designed around how clipping actually gets done.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="p-6 rounded-2xl bg-canvas border border-line flex flex-col justify-between shadow-card">
                 <div>
-                  <div className="flex items-center gap-1 text-gold-500 mb-4">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />
-                    ))}
+                  <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-[#0066ff] mb-4">
+                    <Zap className="w-5 h-5" />
                   </div>
                   <p className="text-sm text-ink-body leading-relaxed mb-6">
-                    "OpusPulse grew our channel from 12k to 430k subscribers in 45 days. The AI virality score is shockingly accurate—every clip with a 95+ score has gone over 500k views on TikTok."
+                    Paste a link or drop a file and let the analysis pipeline segment the source into candidate shorts with timestamps, hooks, and scores you can inspect.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 pt-4 border-t border-line">
-                  <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center font-bold text-[#0066ff]">
-                    DA
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-ink">David Armstrong</h4>
-                    <p className="text-xs text-ink-dim">Host, The Modern Nomad Podcast</p>
-                  </div>
-                </div>
+                <h4 className="text-sm font-bold text-ink">From long-form to candidates in one pass</h4>
               </div>
 
               <div className="p-6 rounded-2xl bg-canvas border border-line flex flex-col justify-between shadow-card">
                 <div>
-                  <div className="flex items-center gap-1 text-gold-500 mb-4">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />
-                    ))}
+                  <div className="w-10 h-10 rounded-full bg-gold-50 border border-gold-200 flex items-center justify-center text-gold-600 mb-4">
+                    <Sliders className="w-5 h-5" />
                   </div>
                   <p className="text-sm text-ink-body leading-relaxed mb-6">
-                    "We manage 14 executive clients. Previously, we needed 3 junior video editors cutting 40 hours of webinar content. OpusPulse replaced 80% of our manual clipping pipeline seamlessly."
+                    Set exact start and end times on an interactive timeline, then choose caption and layout presets — the render pipeline handles reframing to 9:16.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 pt-4 border-t border-line">
-                  <div className="w-10 h-10 rounded-full bg-gold-50 border border-gold-200 flex items-center justify-center font-bold text-gold-600">
-                    SL
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-ink">Samantha Lin</h4>
-                    <p className="text-xs text-ink-dim">Managing Director, ViralFoundry Agency</p>
-                  </div>
-                </div>
+                <h4 className="text-sm font-bold text-ink">Precise control where it matters</h4>
               </div>
 
               <div className="p-6 rounded-2xl bg-canvas border border-line flex flex-col justify-between shadow-card">
                 <div>
-                  <div className="flex items-center gap-1 text-gold-500 mb-4">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />
-                    ))}
+                  <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-[#0066ff] mb-4">
+                    <Captions className="w-5 h-5" />
                   </div>
                   <p className="text-sm text-ink-body leading-relaxed mb-6">
-                    "The active speaker re-centering and Hormozi-style animated captions look hand-crafted by an elite motion designer. I won't publish long-form without running it through OpusPulse first."
+                    Transcripts arrive timestamped and speaker-tagged, searchable in the browser, and exportable as TXT or SRT for your caption workflow.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 pt-4 border-t border-line">
-                  <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center font-bold text-[#0066ff]">
-                    MR
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-ink">Marcus Ray</h4>
-                    <p className="text-xs text-ink-dim">Creator (1.2M YouTube Subscribers)</p>
-                  </div>
-                </div>
+                <h4 className="text-sm font-bold text-ink">Transcription that fits editing</h4>
               </div>
             </div>
           </div>
@@ -1174,53 +1123,33 @@ export default function LandingPage({ setActiveTab }) {
             <div className="relative z-10 max-w-3xl mx-auto">
               <span className="px-4 py-1.5 rounded-full bg-blue-50 text-[#0066ff] border border-blue-200 text-xs font-semibold inline-flex items-center gap-2 mb-6">
                 <Clock className="w-3.5 h-3.5" />
-                Claim 75 Free Processing Minutes Today
+                Free to try — no credit card required
               </span>
 
               <h2 className="text-3xl sm:text-5xl font-display font-bold text-ink mb-6 tracking-tight">
-                Turn Your Long Video Into Viral Gold in 30 Seconds.
+                Ready to Make Your First AI Clip?
               </h2>
 
               <p className="text-base sm:text-lg text-ink-muted mb-10 max-w-2xl mx-auto">
-                No credit card required. Paste your YouTube link or upload any video file to get 10 ready-to-post vertical shorts with kinetic captions right now.
+                Create a free account, paste a YouTube link or upload a video, and the studio takes it from there.
               </p>
 
-              {emailSuccess ? (
-                <div className="p-4 rounded-xl bg-blue-50 border border-blue-300 text-blue-800 text-sm font-semibold max-w-md mx-auto flex items-center justify-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-[#0066ff]" />
-                  <span>Welcome! 75 Free Minutes have been credited to your account.</span>
-                </div>
-              ) : (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (emailInput) setEmailSuccess(true);
-                  }}
-                  className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto"
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
+                <button
+                  type="button"
+                  onClick={() => onOpenAuth?.()}
+                  className="btn-primary w-full sm:w-auto py-3.5 px-8 text-sm font-semibold shrink-0"
                 >
-                  <input
-                    type="email"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="Enter your email address..."
-                    required
-                    className="w-full px-5 py-3.5 rounded-full bg-white border border-line text-ink placeholder:text-ink-dim text-sm focus:ring-2 focus:ring-[#0066ff] focus:outline-none shadow-xs"
-                  />
-                  <button
-                    type="submit"
-                    className="btn-primary w-full sm:w-auto py-3.5 px-8 text-sm font-semibold shrink-0"
-                  >
-                    Start Free
-                  </button>
-                </form>
-              )}
+                  Create Free Account
+                </button>
+              </div>
 
               <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-ink-dim">
                 <span className="flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 text-[#0066ff]" /> No credit card required
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-[#0066ff]" /> 75 free processing minutes
+                  <CheckCircle2 className="w-4 h-4 text-[#0066ff]" /> Sign up in under a minute
                 </span>
                 <span className="flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 text-[#0066ff]" /> 4K Ultra-HD export

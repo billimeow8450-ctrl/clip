@@ -19,6 +19,10 @@ os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-clip-studio-testing-32-bytes
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:5173,http://127.0.0.1:5173"
 os.environ["MAX_LOGIN_ATTEMPTS_PER_MIN"] = "5"
 os.environ["MAX_REGISTRATIONS_PER_10MIN"] = "3"
+# Test-friendly modes: public file URLs (so download tests exercise both paths)
+# and dev echo of reset tokens (no SMTP server in CI).
+os.environ["ALLOW_PUBLIC_FILE_URLS"] = "0"
+os.environ["RESET_TOKEN_DEBUG_ECHO"] = "1"
 
 import backend.database as db_module
 from backend.main import app
@@ -57,13 +61,13 @@ async def auth_user():
 
     async with await get_db() as db:
         cursor = await db.execute(
-            "INSERT INTO users (email, username, hashed_password, tier) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (email, username, hashed_password, tier, token_version) VALUES (?, ?, ?, ?, 0)",
             (email, username, hashed, "pro"),
         )
         await db.commit()
         user_id = cursor.lastrowid
 
-    token = create_access_token({"sub": user_id})
+    token = create_access_token({"sub": user_id}, token_version=0)
     return {
         "id": user_id,
         "email": email,

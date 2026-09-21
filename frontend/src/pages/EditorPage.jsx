@@ -1,15 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { Video, Upload, Sparkles, Scissors, Download, Loader2, AlertCircle, Play, CheckCircle2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Upload, Sparkles, Download, Loader2, AlertCircle, Info, Play } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
 import TimelineTrimmer from '../components/editor/TimelineTrimmer';
 import { api, resolveApiUrl } from '../api';
+import { useJobPolling } from '../hooks/useJobPolling';
+
+const MAX_UPLOAD_MB = 500;
 
 export default function EditorPage({ user, onRequireAuth }) {
   const [sourceType, setSourceType] = useState('youtube'); // 'youtube' or 'file'
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [metadata, setMetadata] = useState(null);
   const [file, setFile] = useState(null);
-  
+
   // Timeline selection states
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(60);
@@ -22,9 +25,23 @@ export default function EditorPage({ user, onRequireAuth }) {
   // Job & processing states
   const [fetchingMeta, setFetchingMeta] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [activeJob, setActiveJob] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [jobError, setJobError] = useState('');
+  const [isSimulation, setIsSimulation] = useState(false);
+
+  const handleFinished = (res) => {
+    if (res.status === 'completed' && res.result_data) {
+      setResult(res.result_data);
+      setIsSimulation(Boolean(res.result_data.is_simulation));
+      setLoading(false);
+    } else {
+      setJobError(res.error_message || 'Video editor rendering failed');
+      setLoading(false);
+    }
+  };
+
+  const { activeJob, startPolling } = useJobPolling(handleFinished);
 
   const handleFetchMetadata = async (url) => {
     if (!url || (!url.includes('youtube.com') && !url.includes('youtu.be'))) return;
@@ -44,28 +61,6 @@ export default function EditorPage({ user, onRequireAuth }) {
     }
   };
 
-  useEffect(() => {
-    let timer = null;
-    if (activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed') {
-      timer = setInterval(async () => {
-        try {
-          const res = await api.jobs.get(activeJob.id);
-          setActiveJob(res);
-          if (res.status === 'completed' && res.result_data) {
-            setResult(res.result_data);
-            setLoading(false);
-          } else if (res.status === 'failed') {
-            setError(res.error_message || 'Video editor rendering failed');
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      }, 1500);
-    }
-    return () => clearInterval(timer);
-  }, [activeJob]);
-
   const handleProcessEdit = async () => {
     if (!user) {
       onRequireAuth();
@@ -73,6 +68,7 @@ export default function EditorPage({ user, onRequireAuth }) {
     }
 
     setError('');
+    setJobError('');
     setLoading(true);
     setResult(null);
 
@@ -82,8 +78,11 @@ export default function EditorPage({ user, onRequireAuth }) {
 
       if (sourceType === 'file') {
         if (!file) throw new Error('Please select a video file to upload.');
+        if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+          throw new Error(`File exceeds the ${MAX_UPLOAD_MB}MB upload limit.`);
+        }
         const uploadRes = await api.files.upload(file);
-        sourceUrl = uploadRes.url;
+        sourceUrl = uploadRes.url_base || uploadRes.url;
         title = file.name;
       } else {
         if (!youtubeUrl) throw new Error('Please enter a valid YouTube URL.');
@@ -100,12 +99,14 @@ export default function EditorPage({ user, onRequireAuth }) {
         layout_mode: layoutMode,
       });
 
-      setActiveJob({ id: res.job_id, status: 'queued', progress: 0, stage: 'Queued' });
+      startPolling({ id: res.job_id, status: 'queued', progress: 0, stage: 'Queued' });
     } catch (err) {
       setError(err.message || 'Failed to start AI Video Editor.');
       setLoading(false);
     }
   };
+
+  const isProcessing = activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed';
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-16">
@@ -125,10 +126,11 @@ export default function EditorPage({ user, onRequireAuth }) {
       {/* Input Source & Timeline Card */}
       <div className="theme-card p-6 md:p-8 space-y-5">
         {/* Source Switcher */}
-        <div className="flex gap-2 max-w-sm mx-auto bg-[#eaf0f2] p-1 rounded-[9px] border border-[#d4dee4]">
+        <div className="flex gap-2 max-w-sm mx-auto bg-[#eaf0f2] p-1 rounded-[9px] border border-[#d4dee4]" role="group" aria-label="Source type">
           <button
             type="button"
             onClick={() => setSourceType('youtube')}
+            aria-pressed={sourceType === 'youtube'}
             className={`flex-1 py-1.5 rounded-[7px] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
               sourceType === 'youtube' ? 'bg-white text-[#0f766e] shadow-sm' : 'text-[#526173] hover:text-[#0f172a]'
             }`}
@@ -139,6 +141,7 @@ export default function EditorPage({ user, onRequireAuth }) {
           <button
             type="button"
             onClick={() => setSourceType('file')}
+            aria-pressed={sourceType === 'file'}
             className={`flex-1 py-1.5 rounded-[7px] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
               sourceType === 'file' ? 'bg-white text-[#0f766e] shadow-sm' : 'text-[#526173] hover:text-[#0f172a]'
             }`}
@@ -150,7 +153,7 @@ export default function EditorPage({ user, onRequireAuth }) {
 
         {sourceType === 'youtube' ? (
           <div>
-            <label className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
+            <label htmlFor="editor-url" className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
               YouTube Video Link
             </label>
             <div className="flex gap-2">
@@ -159,6 +162,7 @@ export default function EditorPage({ user, onRequireAuth }) {
                   <YoutubeIcon className="w-4 h-4 text-red-600" />
                 </div>
                 <input
+                  id="editor-url"
                   type="url"
                   value={youtubeUrl}
                   onChange={(e) => setYoutubeUrl(e.target.value)}
@@ -188,7 +192,9 @@ export default function EditorPage({ user, onRequireAuth }) {
                 {file ? file.name : 'Select source video file'}
               </span>
               <span className="text-[11px] text-[#64748b] mt-0.5 font-mono">
-                {file ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : 'MP4, MOV, MKV supported'}
+                {file
+                  ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+                  : `MP4, MOV, MKV supported (max ${MAX_UPLOAD_MB} MB)`}
               </span>
               <input
                 type="file"
@@ -212,7 +218,7 @@ export default function EditorPage({ user, onRequireAuth }) {
           <div className="theme-well p-3 flex flex-col sm:flex-row items-center gap-3">
             <img
               src={metadata.thumbnail}
-              alt={metadata.title}
+              alt={metadata.title || 'Video thumbnail'}
               className="w-full sm:w-40 h-24 object-cover rounded-[6px] shrink-0 border border-[#d4dee4]"
             />
             <div className="text-left flex-1 min-w-0">
@@ -246,10 +252,10 @@ export default function EditorPage({ user, onRequireAuth }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-[#e2e8f0]">
           {/* Caption Style */}
           <div>
-            <label className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
+            <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
               Caption Typography Preset
-            </label>
-            <div className="grid grid-cols-3 gap-1.5">
+            </div>
+            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Caption style">
               {[
                 { id: 'hormozi', label: '🔥 Hormozi' },
                 { id: 'mrbeast', label: '⚡ MrBeast' },
@@ -261,6 +267,7 @@ export default function EditorPage({ user, onRequireAuth }) {
                   key={style.id}
                   type="button"
                   onClick={() => setCaptionStyle(style.id)}
+                  aria-pressed={captionStyle === style.id}
                   className={`text-xs py-1.5 px-2 rounded-[7px] font-semibold border transition-all ${
                     captionStyle === style.id
                       ? 'bg-[#edf5f3] text-[#0f766e] border-[#c4e3dc]'
@@ -275,10 +282,10 @@ export default function EditorPage({ user, onRequireAuth }) {
 
           {/* Reframing Layout */}
           <div>
-            <label className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
+            <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
               Framing & Geometry Layout
-            </label>
-            <div className="grid grid-cols-2 gap-1.5">
+            </div>
+            <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Layout mode">
               {[
                 { id: 'focus', label: '🎯 Focus (1 Speaker)' },
                 { id: 'duo_context', label: '👥 Duo Split Screen' },
@@ -289,6 +296,7 @@ export default function EditorPage({ user, onRequireAuth }) {
                   key={layout.id}
                   type="button"
                   onClick={() => setLayoutMode(layout.id)}
+                  aria-pressed={layoutMode === layout.id}
                   className={`text-xs py-1.5 px-2 rounded-[7px] font-semibold border transition-all ${
                     layoutMode === layout.id
                       ? 'bg-[#edf5f3] text-[#0f766e] border-[#c4e3dc]'
@@ -302,10 +310,10 @@ export default function EditorPage({ user, onRequireAuth }) {
           </div>
         </div>
 
-        {error && (
-          <div className="p-3 bg-[#fef2f2] border border-[#fecaca] text-[#b91c1c] text-xs rounded-[9px] flex items-center gap-2">
+        {(error || jobError) && (
+          <div className="p-3 bg-[#fef2f2] border border-[#fecaca] text-[#b91c1c] text-xs rounded-[9px] flex items-center gap-2" role="alert">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
+            <span>{error || jobError}</span>
           </div>
         )}
 
@@ -331,8 +339,8 @@ export default function EditorPage({ user, onRequireAuth }) {
       </div>
 
       {/* Active Job Progress */}
-      {activeJob && activeJob.status !== 'completed' && (
-        <div className="theme-card p-5 border-l-4 border-l-[#0f766e]">
+      {isProcessing && (
+        <div className="theme-card p-5 border-l-4 border-l-[#0f766e]" role="status" aria-live="polite">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-[#0f172a]">
               <Loader2 className="w-4 h-4 text-[#0f766e] animate-spin" />
@@ -342,7 +350,13 @@ export default function EditorPage({ user, onRequireAuth }) {
               {Math.round(activeJob.progress || 0)}%
             </span>
           </div>
-          <div className="w-full h-2 bg-[#eaf0f2] rounded-full overflow-hidden">
+          <div
+            className="w-full h-2 bg-[#eaf0f2] rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuenow={Math.round(activeJob.progress || 0)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <div
               className="h-full bg-[#0f766e] rounded-full transition-all duration-300"
               style={{ width: `${activeJob.progress || 10}%` }}
@@ -355,9 +369,19 @@ export default function EditorPage({ user, onRequireAuth }) {
       {result && (
         <div className="theme-card p-6 text-left">
           <div className="flex items-center gap-2 text-[#0f766e] font-semibold text-xs mb-4">
-            <CheckCircle2 className="w-4 h-4" />
+            <Sparkles className="w-4 h-4" />
             <span>Range Execution Complete</span>
           </div>
+
+          {isSimulation && (
+            <div className="mb-4 p-3 rounded-[9px] bg-[#fffbeb] border border-[#fde68a] text-[#b45309] text-xs flex items-start gap-2" role="status">
+              <Info className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Simulation mode: no video file was rendered. The server needs
+                ENABLE_HEAVY_RENDERING=1 and a source file it can process to produce a download.
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
             <div className="theme-well p-4 rounded-[9px] flex items-center justify-center aspect-[9/16] max-w-[220px] mx-auto bg-[#0f172a] relative">
@@ -374,7 +398,7 @@ export default function EditorPage({ user, onRequireAuth }) {
               <h3 className="text-base font-bold text-[#0f172a]">
                 {result.title || 'AI Edited Clip'}
               </h3>
-              
+
               <div className="space-y-1.5 text-xs text-[#526173]">
                 <div className="flex justify-between py-1 border-b border-[#e2e8f0]">
                   <span className="font-semibold">Selected Window:</span>
@@ -393,14 +417,25 @@ export default function EditorPage({ user, onRequireAuth }) {
               </div>
 
               <div className="pt-3">
-                <a
-                  href={resolveApiUrl(result.output_video)}
-                  download="edited_clip.mp4"
-                  className="btn-primary w-full text-xs py-2.5 font-semibold flex items-center justify-center gap-2"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Edited MP4</span>
-                </a>
+                {result.output_video ? (
+                  <a
+                    href={resolveApiUrl(result.output_video)}
+                    download="edited_clip.mp4"
+                    className="btn-primary w-full text-xs py-2.5 font-semibold flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Edited MP4</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full text-xs py-2.5 font-semibold rounded-[9px] border border-[#d4dee4] bg-[#eaf0f2] text-[#64748b] flex items-center justify-center gap-2 cursor-not-allowed"
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                    <span>No file produced (simulation mode)</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

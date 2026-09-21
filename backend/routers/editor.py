@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from ..database import get_db
 from ..auth import get_current_user
-from ..worker import process_editor_job
+from ..worker import process_editor_job, spawn_job
 
 router = APIRouter(prefix="/api/editor", tags=["Editor"])
 
@@ -86,8 +86,7 @@ async def process_editor(
         )
         await db.commit()
 
-    # Launch background worker
-    asyncio.create_task(process_editor_job(job_id, params, user["id"]))
+    spawn_job(process_editor_job(job_id, params, user["id"]))
 
     return EditorProcessResponse(
         job_id=job_id,

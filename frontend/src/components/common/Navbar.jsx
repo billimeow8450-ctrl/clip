@@ -1,7 +1,21 @@
-import React from 'react';
-import { Scissors, FolderKanban, LogOut, FileText, WandSparkles } from 'lucide-react';
+import React, { useState } from 'react';
+import { Scissors, FolderKanban, LogOut, FileText, WandSparkles, Menu, X } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpenAuth }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const navItems = [
+    { id: 'clipper', label: 'AI Clipper', icon: Scissors },
+    { id: 'editor', label: 'Video Editor', icon: WandSparkles },
+    { id: 'transcriber', label: 'Transcriber', icon: FileText },
+    { id: 'projects', label: 'Projects', icon: FolderKanban },
+  ];
+
+  const go = (id) => {
+    setActiveTab(id);
+    setMobileOpen(false);
+  };
+
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-xl border-b border-slate-100 transition-all">
       <div className="container-custom min-h-16 py-3 flex items-center justify-between gap-4">
@@ -25,14 +39,20 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpen
           </div>
         </button>
 
+        {/* Mobile menu toggle */}
+        <button
+          type="button"
+          className="lg:hidden w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50"
+          aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((v) => !v)}
+        >
+          {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+
         {/* Center nav with active indicator */}
         <nav className="hidden lg:flex items-center gap-1" aria-label="Primary navigation">
-          {[
-            { id: 'clipper', label: 'AI Clipper', icon: Scissors },
-            { id: 'editor', label: 'Video Editor', icon: WandSparkles },
-            { id: 'transcriber', label: 'Transcriber', icon: FileText },
-            { id: 'projects', label: 'Projects', icon: FolderKanban },
-          ].map(({ id, label, icon: Icon }) => (
+          {navItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
@@ -88,6 +108,40 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpen
           )}
         </div>
       </div>
+
+      {/* Mobile navigation drawer */}
+      {mobileOpen && (
+        <nav className="lg:hidden border-t border-slate-100 bg-white px-4 py-3 space-y-1" aria-label="Mobile navigation">
+          {navItems.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => go(id)}
+              aria-current={activeTab === id ? 'page' : undefined}
+              className={`w-full min-h-11 px-3.5 rounded-xl text-sm font-semibold flex items-center gap-2.5 transition-colors ${
+                activeTab === id
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
+              }`}
+            >
+              <Icon className="w-4 h-4" aria-hidden="true" />
+              {label}
+            </button>
+          ))}
+          {!user && (
+            <button
+              type="button"
+              onClick={() => {
+                setMobileOpen(false);
+                onOpenAuth();
+              }}
+              className="w-full min-h-11 px-3.5 rounded-xl text-sm font-semibold bg-slate-950 text-white flex items-center gap-2.5"
+            >
+              Get Free Clips
+            </button>
+          )}
+        </nav>
+      )}
     </header>
   );
 }

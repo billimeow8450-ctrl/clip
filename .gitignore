@@ -25,6 +25,9 @@ backend/.env
 !.env.example
 !backend/.env.example
 
+# Local secrets (API tokens for deployment automation) — never commit
+.secrets/
+
 # Storage and Databases
 backend/data/*.db
 backend/data/*.db-journal

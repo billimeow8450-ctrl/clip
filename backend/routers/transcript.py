@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from ..database import get_db
 from ..auth import get_current_user
-from ..worker import process_transcript_job
+from ..worker import process_transcript_job, spawn_job
 from ..utils.security import validate_source_url
 
 router = APIRouter(prefix="/api/transcript", tags=["Transcript"])
@@ -76,7 +76,7 @@ async def process_transcript(
         )
         await db.commit()
 
-    asyncio.create_task(process_transcript_job(job_id, params, user["id"]))
+    spawn_job(process_transcript_job(job_id, params, user["id"]))
 
     return TranscriptProcessResponse(
         job_id=job_id,

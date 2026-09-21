@@ -144,7 +144,7 @@ export default function ProjectsPage({ user, onRequireAuth }) {
                         <TrendingUp className="w-3.5 h-3.5" />
                         Completed
                       </span>
-                      {job.result_data?.output_video && (
+                      {job.result_data?.output_video ? (
                         <a
                           href={resolveApiUrl(job.result_data.output_video)}
                           download
@@ -153,6 +153,13 @@ export default function ProjectsPage({ user, onRequireAuth }) {
                           <Download className="w-3.5 h-3.5" />
                           <span>Download MP4</span>
                         </a>
+                      ) : (
+                        <span
+                          className="text-xs text-ink-dim font-mono"
+                          title="Simulation mode produces no downloadable file"
+                        >
+                          No file (simulation)
+                        </span>
                       )}
                     </div>
                   )}

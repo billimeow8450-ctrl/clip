@@ -27,6 +27,12 @@ export default function App() {
       api.auth.getMe().then(setUser).catch(() => setUser(null));
     }
 
+    // Deep link from a password-reset email (?reset_token=...#/): open the
+    // auth modal so AuthPage can pick up the token and prefill the form.
+    if (new URLSearchParams(window.location.search).get('reset_token')) {
+      setShowAuthModal(true);
+    }
+
     const onHashChange = () => setActiveTab(readTabFromHash());
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
@@ -64,7 +70,10 @@ export default function App() {
 
         <main id="main-content">
           {activeTab === 'landing' && (
-            <LandingPage setActiveTab={navigate} />
+            <LandingPage
+              setActiveTab={navigate}
+              onOpenAuth={() => setShowAuthModal(true)}
+            />
           )}
 
           {activeTab === 'clipper' && (
@@ -127,21 +136,12 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
               <a href="#features" className="hover:text-ink transition-colors">Features</a>
               <a href="#studio" className="hover:text-ink transition-colors">AI Studio</a>
-              <a href="#virality" className="hover:text-ink transition-colors">Virality Score</a>
               <a href="#faq" className="hover:text-ink transition-colors">FAQ</a>
-              <span className="text-ink-dim hover:text-ink cursor-pointer">API Docs</span>
-              <span className="text-ink-dim hover:text-ink cursor-pointer">Affiliates</span>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-8 text-ink-dim">
-            <p>© {new Date().getFullYear()} OpusPulse AI Inc. Computational short-form video intelligence. All rights reserved.</p>
-            <div className="flex items-center gap-4">
-              <span className="inline-flex items-center gap-2 text-teal-700 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-teal-500 pulse-teal-dot"></span>
-                All AI Systems Operational (99.98%)
-              </span>
-            </div>
+            <p>© {new Date().getFullYear()} OpusPulse AI. Short-form video intelligence. All rights reserved.</p>
           </div>
         </div>
       </footer>

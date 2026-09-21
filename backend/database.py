@@ -1,6 +1,8 @@
+import asyncio
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -17,14 +19,28 @@ def is_postgres() -> bool:
 
 
 def _convert_sqlite_to_pg_query(query: str) -> tuple[str, bool]:
-    """Convert SQLite ? placeholders to PostgreSQL $1, $2... and handle RETURNING id."""
-    count = 0
-    def replacer(match):
-        nonlocal count
-        count += 1
-        return f"${count}"
+    """Convert SQLite ``?`` placeholders to PostgreSQL ``$1, $2, ...`` and handle RETURNING id.
 
-    pg_query = re.sub(r"\?", replacer, query)
+    Placeholder replacement is quote-aware: a ``?`` inside a SQL string literal is
+    preserved verbatim instead of being rewritten into a parameter reference.
+    """
+    count = 0
+    out: List[str] = []
+    in_string = False
+    for ch in query:
+        if ch == "'":
+            # SQL escapes a literal quote by doubling it (''); toggling twice
+            # returns us to the same in-string state, which is correct.
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if ch == "?" and not in_string:
+            count += 1
+            out.append(f"${count}")
+            continue
+        out.append(ch)
+
+    pg_query = "".join(out)
     is_insert = pg_query.strip().upper().startswith("INSERT INTO")
     has_returning = "RETURNING" in pg_query.upper()
 
@@ -59,22 +75,21 @@ class _PGConnectionWrapper:
 
     async def execute(self, query: str, params: tuple = ()) -> _PGCursor:
         pg_query, is_insert = _convert_sqlite_to_pg_query(query)
-        try:
-            if is_insert:
-                records = await self._conn.fetch(pg_query, *params)
-                last_id = records[0]["id"] if records and "id" in records[0] else None
-                return _PGCursor(records, lastrowid=last_id)
-            elif pg_query.strip().upper().startswith("SELECT"):
-                records = await self._conn.fetch(pg_query, *params)
-                return _PGCursor(records)
-            else:
-                await self._conn.execute(pg_query, *params)
-                return _PGCursor()
-        except Exception as exc:
-            raise exc
+        if is_insert:
+            records = await self._conn.fetch(pg_query, *params)
+            last_id = records[0]["id"] if records and "id" in records[0] else None
+            return _PGCursor(records, lastrowid=last_id)
+        elif pg_query.strip().upper().startswith("SELECT"):
+            records = await self._conn.fetch(pg_query, *params)
+            return _PGCursor(records)
+        else:
+            await self._conn.execute(pg_query, *params)
+            return _PGCursor()
 
     async def commit(self) -> None:
-        pass
+        # asyncpg runs each statement in its own implicit transaction; the
+        # write is already durable when execute() returns.
+        return None
 
 
 class _PGDBContext:
@@ -110,6 +125,36 @@ class _PGDBContext:
             await _PG_POOL.release(self._conn)
 
 
+class _SQLiteCursor:
+    def __init__(self, cursor: sqlite3.Cursor):
+        self._cursor = cursor
+        self.lastrowid = cursor.lastrowid
+
+    async def fetchone(self) -> Optional[sqlite3.Row]:
+        return await asyncio.to_thread(self._cursor.fetchone)
+
+    async def fetchall(self) -> List[sqlite3.Row]:
+        return await asyncio.to_thread(self._cursor.fetchall)
+
+
+class _SQLiteConnectionWrapper:
+    def __init__(self, conn: sqlite3.Connection, lock: asyncio.Lock):
+        self._conn = conn
+        self._lock = lock
+
+    async def execute(self, query: str, params: tuple = ()) -> _SQLiteCursor:
+        # The lock serializes statement execution across worker threads for
+        # this connection (a cursor must not interleave with another statement
+        # on the same connection).
+        async with self._lock:
+            cursor = await asyncio.to_thread(self._conn.execute, query, params)
+        return _SQLiteCursor(cursor)
+
+    async def commit(self) -> None:
+        async with self._lock:
+            await asyncio.to_thread(self._conn.commit)
+
+
 class _DBContext:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -120,52 +165,87 @@ class _DBContext:
             return self
         return _open().__await__()
 
-    async def __aenter__(self) -> "_SQLiteConnectionWrapper":
-        # aiosqlite currently deadlocks on Python 3.14 in some environments.
-        # SQLite operations here are deliberately small, so a synchronous
-        # connection behind the existing async-shaped interface is reliable
-        # and keeps callers identical across SQLite and PostgreSQL.
+    async def __aenter__(self) -> _SQLiteConnectionWrapper:
+        # SQLite operations run through asyncio.to_thread so disk I/O never
+        # blocks the event loop (previously a 30s write lock froze every
+        # concurrent HTTP request). The async-shaped interface is preserved so
+        # callers remain identical across SQLite and PostgreSQL.
+        #
+        # check_same_thread=False is required because to_thread's worker pool
+        # may dispatch successive calls to different threads; the per-context
+        # threading.Lock below serializes access so this remains safe.
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, timeout=30)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys=ON;")
-        self._conn.execute("PRAGMA busy_timeout=30000;")
-        return _SQLiteConnectionWrapper(self._conn)
+
+        def _connect() -> sqlite3.Connection:
+            conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute("PRAGMA busy_timeout=30000;")
+            return conn
+
+        self._conn = await asyncio.to_thread(_connect)
+        self._lock = asyncio.Lock()
+        return _SQLiteConnectionWrapper(self._conn, self._lock)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._conn:
             if exc_type is not None:
-                self._conn.rollback()
-            self._conn.close()
-
-
-class _SQLiteCursor:
-    def __init__(self, cursor: sqlite3.Cursor):
-        self._cursor = cursor
-        self.lastrowid = cursor.lastrowid
-
-    async def fetchone(self) -> Optional[sqlite3.Row]:
-        return self._cursor.fetchone()
-
-    async def fetchall(self) -> List[sqlite3.Row]:
-        return self._cursor.fetchall()
-
-
-class _SQLiteConnectionWrapper:
-    def __init__(self, conn: sqlite3.Connection):
-        self._conn = conn
-
-    async def execute(self, query: str, params: tuple = ()) -> _SQLiteCursor:
-        return _SQLiteCursor(self._conn.execute(query, params))
-
-    async def commit(self) -> None:
-        self._conn.commit()
+                await asyncio.to_thread(self._conn.rollback)
+            await asyncio.to_thread(self._conn.close)
+            self._conn = None
 
 
 def get_db():
     if is_postgres():
         return _PGDBContext(os.getenv("DATABASE_URL", "").strip())
     return _DBContext(DB_PATH)
+
+
+def _parse_db_timestamp(value: Any) -> Optional[datetime]:
+    """Parse timestamps returned by either dialect (datetime or string)."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def _run_migrations(db) -> None:
+    """Idempotent migrations that must not fail on fresh installs."""
+    # users.token_version: bumped on password reset to invalidate all JWTs.
+    try:
+        await db.execute(
+            "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
+        )
+    except Exception:
+        pass  # Column already exists (SQLite raises, PG we use IF NOT EXISTS below)
+
+    if is_postgres():
+        await db.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+async def _create_indexes(db) -> None:
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)",
+        "CREATE INDEX IF NOT EXISTS idx_clips_user_id ON clips(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_clips_job_id ON clips(job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_revoked_tokens_jti ON revoked_tokens(jti)",
+        "CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens(expires_at)",
+    ]
+    for statement in indexes:
+        await db.execute(statement)
 
 
 async def init_db() -> None:
@@ -179,6 +259,7 @@ async def init_db() -> None:
                     username VARCHAR(255) UNIQUE NOT NULL,
                     hashed_password TEXT NOT NULL,
                     tier VARCHAR(50) DEFAULT 'pro',
+                    token_version INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 );
             """)
@@ -251,6 +332,19 @@ async def init_db() -> None:
                     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS revoked_tokens (
+                    id VARCHAR(100) PRIMARY KEY,
+                    jti VARCHAR(64) UNIQUE NOT NULL,
+                    user_id INTEGER,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            await _run_migrations(db)
+            await _create_indexes(db)
         return
 
     # Fallback to local SQLite
@@ -266,6 +360,7 @@ async def init_db() -> None:
                 username TEXT UNIQUE NOT NULL,
                 hashed_password TEXT NOT NULL,
                 tier TEXT DEFAULT 'pro',
+                token_version INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -349,5 +444,19 @@ async def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
         """)
+
+        # Revoked JWTs (logout / token revocation support)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS revoked_tokens (
+                id TEXT PRIMARY KEY,
+                jti TEXT UNIQUE NOT NULL,
+                user_id INTEGER,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        await _run_migrations(db)
+        await _create_indexes(db)
 
         await db.commit()

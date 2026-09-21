@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ..database import get_db
@@ -12,7 +12,12 @@ router = APIRouter(prefix="/api", tags=["Jobs & Projects"])
 
 
 @router.get("/jobs")
-async def list_jobs(user: Dict[str, Any] = Depends(get_current_user)) -> List[Dict[str, Any]]:
+async def list_jobs(
+    user: Dict[str, Any] = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> List[Dict[str, Any]]:
+    """List the caller's jobs, newest first, with offset pagination (finding L8)."""
     async with await get_db() as db:
         cursor = await db.execute(
             """
@@ -20,9 +25,9 @@ async def list_jobs(user: Dict[str, Any] = Depends(get_current_user)) -> List[Di
             FROM jobs
             WHERE user_id = ?
             ORDER BY created_at DESC
-            LIMIT 50
+            LIMIT ? OFFSET ?
             """,
-            (user["id"],),
+            (user["id"], limit, offset),
         )
         rows = await cursor.fetchall()
         jobs = []
@@ -84,7 +89,11 @@ async def list_projects(user: Dict[str, Any] = Depends(get_current_user)) -> Lis
 
 
 @router.get("/clips")
-async def list_clips(user: Dict[str, Any] = Depends(get_current_user)) -> List[Dict[str, Any]]:
+async def list_clips(
+    user: Dict[str, Any] = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> List[Dict[str, Any]]:
     async with await get_db() as db:
         cursor = await db.execute(
             """
@@ -92,9 +101,9 @@ async def list_clips(user: Dict[str, Any] = Depends(get_current_user)) -> List[D
             FROM clips
             WHERE user_id = ?
             ORDER BY created_at DESC
-            LIMIT 50
+            LIMIT ? OFFSET ?
             """,
-            (user["id"],),
+            (user["id"], limit, offset),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]

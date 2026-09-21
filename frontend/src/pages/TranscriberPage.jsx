@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Upload, Download, Search, Copy, Check, Sparkles, Loader2, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Upload, Download, Search, Copy, Check, Sparkles, Loader2, AlertCircle, Info } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
 import { api, resolveApiUrl } from '../api';
+import { useJobPolling } from '../hooks/useJobPolling';
+
+const MAX_UPLOAD_MB = 500;
 
 export default function TranscriberPage({ user, onRequireAuth }) {
   const [url, setUrl] = useState('');
@@ -12,31 +15,23 @@ export default function TranscriberPage({ user, onRequireAuth }) {
   const [copied, setCopied] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [activeJob, setActiveJob] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [jobError, setJobError] = useState('');
+  const [isSimulation, setIsSimulation] = useState(false);
 
-  useEffect(() => {
-    let timer = null;
-    if (activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed') {
-      timer = setInterval(async () => {
-        try {
-          const res = await api.jobs.get(activeJob.id);
-          setActiveJob(res);
-          if (res.status === 'completed' && res.result_data) {
-            setResult(res.result_data);
-            setLoading(false);
-          } else if (res.status === 'failed') {
-            setError(res.error_message || 'Transcription failed');
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      }, 1500);
+  const handleFinished = (res) => {
+    if (res.status === 'completed' && res.result_data) {
+      setResult(res.result_data);
+      setIsSimulation(Boolean(res.result_data.is_simulation));
+      setLoading(false);
+    } else {
+      setJobError(res.error_message || 'Transcription failed');
+      setLoading(false);
     }
-    return () => clearInterval(timer);
-  }, [activeJob]);
+  };
+
+  const { activeJob, startPolling } = useJobPolling(handleFinished);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -46,10 +41,16 @@ export default function TranscriberPage({ user, onRequireAuth }) {
     }
 
     setError('');
+    setJobError('');
     let inputSource = url.trim();
 
     if (!inputSource && !file) {
       setError('Please provide a YouTube URL or audio/video file.');
+      return;
+    }
+
+    if (file && file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setError(`File exceeds the ${MAX_UPLOAD_MB}MB upload limit.`);
       return;
     }
 
@@ -59,7 +60,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
     try {
       if (file && !inputSource) {
         const uploadRes = await api.files.upload(file);
-        inputSource = uploadRes.url;
+        inputSource = uploadRes.url_base || uploadRes.url;
       }
 
       const res = await api.transcript.process({
@@ -69,24 +70,31 @@ export default function TranscriberPage({ user, onRequireAuth }) {
         export_format: exportFormat,
       });
 
-      setActiveJob({ id: res.job_id, status: 'queued', progress: 0, stage: 'Queued' });
+      startPolling({ id: res.job_id, status: 'queued', progress: 0, stage: 'Queued' });
     } catch (err) {
       setError(err.message || 'Failed to submit transcription job.');
       setLoading(false);
     }
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!result?.full_text) return;
-    navigator.clipboard.writeText(result.full_text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(result.full_text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API can fail on non-secure origins; text stays visible regardless.
+    }
   };
 
-  const filteredSegments = result?.segments?.filter((seg) =>
-    seg.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    seg.speaker.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  const filteredSegments = (result?.segments || []).filter((seg) => {
+    if (!seg) return false;
+    const haystack = `${seg.text || ''} ${seg.speaker || ''}`.toLowerCase();
+    return haystack.includes(searchQuery.toLowerCase());
+  });
+
+  const exportHref = result?.export_files?.[exportFormat];
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-16">
@@ -107,7 +115,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
       <div className="theme-card p-6 md:p-8">
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
+            <label htmlFor="transcriber-url" className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
               Source YouTube Link
             </label>
             <div className="relative">
@@ -115,6 +123,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                 <YoutubeIcon className="w-4 h-4 text-red-600" />
               </div>
               <input
+                id="transcriber-url"
                 type="url"
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setFile(null); }}
@@ -137,7 +146,9 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                 {file ? file.name : 'Select audio or video file'}
               </span>
               <span className="text-[11px] text-[#64748b] mt-0.5 font-mono">
-                MP4, MP3, WAV, MOV, M4A supported
+                {file
+                  ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+                  : `MP4, MP3, WAV, MOV, M4A (max ${MAX_UPLOAD_MB} MB)`}
               </span>
               <input
                 type="file"
@@ -157,10 +168,10 @@ export default function TranscriberPage({ user, onRequireAuth }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1">
             {/* Language */}
             <div>
-              <label className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
+              <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
                 Model Language
-              </label>
-              <div className="grid grid-cols-4 gap-1.5">
+              </div>
+              <div className="grid grid-cols-4 gap-1.5" role="group" aria-label="Language">
                 {[
                   { id: 'en', label: 'English' },
                   { id: 'ur', label: 'اردو (Urdu)' },
@@ -171,6 +182,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                     key={lang.id}
                     type="button"
                     onClick={() => setLanguage(lang.id)}
+                    aria-pressed={language === lang.id}
                     className={`text-xs py-1.5 font-semibold rounded-[7px] border transition-all ${
                       language === lang.id
                         ? 'bg-[#edf5f3] text-[#0f766e] border-[#c4e3dc]'
@@ -185,10 +197,10 @@ export default function TranscriberPage({ user, onRequireAuth }) {
 
             {/* Export Format */}
             <div>
-              <label className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
+              <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
                 Target Export Format
-              </label>
-              <div className="grid grid-cols-3 gap-1.5">
+              </div>
+              <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Export format">
                 {[
                   { id: 'txt', label: 'TXT File' },
                   { id: 'srt', label: 'SRT Subtitles' },
@@ -198,6 +210,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                     key={fmt.id}
                     type="button"
                     onClick={() => setExportFormat(fmt.id)}
+                    aria-pressed={exportFormat === fmt.id}
                     className={`text-xs py-1.5 font-semibold rounded-[7px] border transition-all ${
                       exportFormat === fmt.id
                         ? 'bg-[#0f172a] text-white border-[#0f172a]'
@@ -211,10 +224,10 @@ export default function TranscriberPage({ user, onRequireAuth }) {
             </div>
           </div>
 
-          {error && (
-            <div className="p-3 bg-[#fef2f2] border border-[#fecaca] text-[#b91c1c] text-xs rounded-[9px] flex items-center gap-2">
+          {(error || jobError) && (
+            <div className="p-3 bg-[#fef2f2] border border-[#fecaca] text-[#b91c1c] text-xs rounded-[9px] flex items-center gap-2" role="alert">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
+              <span>{error || jobError}</span>
             </div>
           )}
 
@@ -239,8 +252,8 @@ export default function TranscriberPage({ user, onRequireAuth }) {
       </div>
 
       {/* Active Job Progress */}
-      {activeJob && activeJob.status !== 'completed' && (
-        <div className="theme-card p-5 border-l-4 border-l-[#0f766e]">
+      {activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed' && (
+        <div className="theme-card p-5 border-l-4 border-l-[#0f766e]" role="status" aria-live="polite">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-[#0f172a]">
               <Loader2 className="w-4 h-4 text-[#0f766e] animate-spin" />
@@ -250,7 +263,13 @@ export default function TranscriberPage({ user, onRequireAuth }) {
               {Math.round(activeJob.progress || 0)}%
             </span>
           </div>
-          <div className="w-full h-2 bg-[#eaf0f2] rounded-full overflow-hidden">
+          <div
+            className="w-full h-2 bg-[#eaf0f2] rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuenow={Math.round(activeJob.progress || 0)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <div
               className="h-full bg-[#0f766e] rounded-full transition-all duration-300"
               style={{ width: `${activeJob.progress || 10}%` }}
@@ -262,6 +281,16 @@ export default function TranscriberPage({ user, onRequireAuth }) {
       {/* Transcript Results Viewer */}
       {result && (
         <div className="theme-card p-6 space-y-4 text-left">
+          {isSimulation && (
+            <div className="p-3 rounded-[9px] bg-[#fffbeb] border border-[#fde68a] text-[#b45309] text-xs flex items-start gap-2" role="status">
+              <Info className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Simulation mode: this transcript is placeholder text, not transcription of your media.
+                The server needs ENABLE_HEAVY_RENDERING=1 with the Whisper pipeline for real output.
+              </span>
+            </div>
+          )}
+
           {/* Action Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#d4dee4]">
             <div>
@@ -269,7 +298,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                 Timestamped Dialogue Log
               </h3>
               <p className="text-[11px] text-[#526173] font-mono">
-                Language Model: <span className="font-bold uppercase text-[#0f766e]">{result.language}</span>
+                Language Model: <span className="font-bold uppercase text-[#0f766e]">{result.language || '—'}</span>
               </p>
             </div>
 
@@ -282,6 +311,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Filter dialogue..."
+                  aria-label="Filter transcript dialogue"
                   className="input-field min-h-[32px] text-xs py-1 pl-8 w-36 sm:w-48"
                 />
               </div>
@@ -296,14 +326,25 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                 <span>{copied ? 'Copied' : 'Copy'}</span>
               </button>
 
-              <a
-                href={resolveApiUrl(result.export_files?.[exportFormat] || '#')}
-                download
-                className="btn-primary min-h-[32px] text-xs py-1 px-3 flex items-center gap-1 font-semibold"
-              >
-                <Download className="w-3 h-3" />
-                <span className="uppercase">{exportFormat}</span>
-              </a>
+              {exportHref ? (
+                <a
+                  href={resolveApiUrl(exportHref)}
+                  download
+                  className="btn-primary min-h-[32px] text-xs py-1 px-3 flex items-center gap-1 font-semibold"
+                >
+                  <Download className="w-3 h-3" />
+                  <span className="uppercase">{exportFormat}</span>
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="min-h-[32px] text-xs py-1 px-3 rounded-full border border-[#d4dee4] bg-[#eaf0f2] text-[#64748b] flex items-center gap-1 font-semibold cursor-not-allowed"
+                >
+                  <Info className="w-3 h-3" />
+                  <span className="uppercase">No file</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -319,7 +360,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                     {seg.start} - {seg.end}
                   </div>
                   <div className="flex-1">
-                    <div className="text-[10px] font-mono font-bold text-[#64748b] uppercase">{seg.speaker}</div>
+                    <div className="text-[10px] font-mono font-bold text-[#64748b] uppercase">{seg.speaker || 'Unknown speaker'}</div>
                     <p className="text-xs text-[#1e293b] leading-relaxed mt-0.5">{seg.text}</p>
                   </div>
                 </div>

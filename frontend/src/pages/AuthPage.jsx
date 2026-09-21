@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { User, Mail, Lock, Scissors, AlertCircle, ArrowRight, X, KeyRound, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { User, Mail, Lock, Scissors, AlertCircle, ArrowRight, X, KeyRound, CheckCircle2, MailCheck } from 'lucide-react';
 import { api } from '../api';
 
 export default function AuthPage({ onAuthSuccess, onClose }) {
@@ -8,15 +8,49 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  
+
   // Forgot / Reset password state
+  // Step 1: request token (sent by email) → Step 2: paste token + set new password
+  const [resetStep, setResetStep] = useState(1);
   const [resetToken, setResetToken] = useState('');
+
+  // Deep link from the reset email: /?reset_token=<token>#/ opens the reset
+  // form with the token prefilled (the SPA uses hash routing, so the token
+  // rides in the query string before the # fragment).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('reset_token');
+    if (token) {
+      setAuthMode('forgot');
+      setResetStep(2);
+      setResetToken(token);
+      params.delete('reset_token');
+      const rest = params.toString();
+      window.history.replaceState(
+        {},
+        '',
+        `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`,
+      );
+    }
+  }, []);
+
   const [newPassword, setNewPassword] = useState('');
-  const [resetStep, setResetStep] = useState(1); // 1: request token, 2: set new password
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+
+  const dialogRef = useRef(null);
+
+  // Modal semantics: Escape to close, focus the dialog on open (finding U5)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    window.addEventListener('keydown', onKey);
+    dialogRef.current?.focus();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,21 +69,21 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
       } else if (authMode === 'forgot') {
         if (resetStep === 1) {
           const res = await api.auth.forgotPassword(email);
-          setSuccessMessage(res.message);
-          if (res.reset_token) {
-            setResetToken(res.reset_token);
-            setResetStep(2);
-          }
+          // The backend no longer returns the token (finding C1): it is sent
+          // by email. A generic message is shown for unknown addresses too.
+          setSuccessMessage(res.message || 'Check your inbox for the reset link.');
+          setResetStep(2);
         } else {
-          if (!newPassword || newPassword.length < 6) {
-            throw new Error('New password must be at least 6 characters long.');
+          if (!newPassword || newPassword.length < 8) {
+            throw new Error('New password must be at least 8 characters.');
           }
-          const res = await api.auth.resetPassword({ token: resetToken, new_password: newPassword });
+          const res = await api.auth.resetPassword({ token: resetToken.trim(), new_password: newPassword });
           setSuccessMessage(res.message);
-          // Return to login after successful password update
           setTimeout(() => {
             setAuthMode('login');
             setResetStep(1);
+            setResetToken('');
+            setNewPassword('');
             setSuccessMessage('Password updated! Please sign in with your new password.');
           }, 1500);
         }
@@ -61,12 +95,27 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
     }
   };
 
+  const switchMode = (mode) => {
+    setAuthMode(mode);
+    setError('');
+    setSuccessMessage('');
+    setResetStep(1);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-md animate-fadeIn">
-      <div className="relative max-w-md w-full p-8 rounded-2xl bg-white border border-line shadow-dropdown">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={authMode === 'login' ? 'Sign in' : authMode === 'register' ? 'Create account' : 'Reset password'}
+        tabIndex={-1}
+        className="relative max-w-md w-full p-8 rounded-2xl bg-white border border-line shadow-dropdown outline-none"
+      >
         {onClose && (
           <button
             onClick={onClose}
+            aria-label="Close"
             className="absolute top-5 right-5 w-8 h-8 rounded-full bg-subtle flex items-center justify-center text-ink-muted hover:text-ink transition-colors"
           >
             <X className="w-4 h-4" />
@@ -80,12 +129,14 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
           <h2 className="text-2xl font-display font-extrabold text-ink">
             {authMode === 'login' && 'Welcome Back'}
             {authMode === 'register' && 'Claim Free Account'}
-            {authMode === 'forgot' && (resetStep === 1 ? 'Reset Your Password' : 'Set New Password')}
+            {authMode === 'forgot' && (resetStep === 1 ? 'Reset Your Password' : 'Check Your Email')}
           </h2>
           <p className="text-xs sm:text-sm text-ink-muted mt-1">
             {authMode === 'login' && 'Sign in to access your viral clips library'}
-            {authMode === 'register' && 'Get 75 Free Processing Minutes in 1 click'}
-            {authMode === 'forgot' && (resetStep === 1 ? 'Enter your email to generate a reset token' : 'Choose a strong new password for your account')}
+            {authMode === 'register' && 'Create your free account in under a minute'}
+            {authMode === 'forgot' && (resetStep === 1
+              ? 'Enter your email and we will send you a reset link'
+              : 'Paste the reset token from your email and choose a new password')}
           </p>
         </div>
 
@@ -93,7 +144,8 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
           <div className="bg-subtle p-1 rounded-xl border border-line flex gap-1 mb-6">
             <button
               type="button"
-              onClick={() => { setAuthMode('login'); setError(''); setSuccessMessage(''); }}
+              onClick={() => switchMode('login')}
+              aria-pressed={authMode === 'login'}
               className={`flex-1 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${
                 authMode === 'login' ? 'bg-white text-teal-700 shadow-xs border border-line' : 'text-ink-muted hover:text-ink'
               }`}
@@ -102,7 +154,8 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
             </button>
             <button
               type="button"
-              onClick={() => { setAuthMode('register'); setError(''); setSuccessMessage(''); }}
+              onClick={() => switchMode('register')}
+              aria-pressed={authMode === 'register'}
               className={`flex-1 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${
                 authMode === 'register' ? 'bg-white text-teal-700 shadow-xs border border-line' : 'text-ink-muted hover:text-ink'
               }`}
@@ -113,15 +166,19 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
         )}
 
         {error && (
-          <div className="p-3 mb-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+          <div className="p-3 mb-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2" role="alert">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
             <span>{error}</span>
           </div>
         )}
 
         {successMessage && (
-          <div className="p-3 mb-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+          <div className="p-3 mb-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl flex items-center gap-2" role="status">
+            {authMode === 'forgot' && resetStep === 2 ? (
+              <MailCheck className="w-4 h-4 shrink-0 text-emerald-600" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            )}
             <span>{successMessage}</span>
           </div>
         )}
@@ -130,46 +187,53 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
           {authMode !== 'forgot' && (
             <>
               <div>
-                <label className="block text-xs font-semibold text-ink-muted mb-1.5">
+                <label htmlFor="auth-email" className="block text-xs font-semibold text-ink-muted mb-1.5">
                   {authMode === 'login' ? 'Email or Username' : 'Email Address'}
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-ink-dim absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
+                    id="auth-email"
                     type={authMode === 'login' ? 'text' : 'email'}
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder={authMode === 'login' ? 'user@domain.com or username' : 'name@domain.com'}
                     className="input-field pl-10"
+                    autoComplete="username"
                   />
                 </div>
               </div>
 
               {authMode === 'register' && (
                 <div>
-                  <label className="block text-xs font-semibold text-ink-muted mb-1.5">Username</label>
+                  <label htmlFor="auth-username" className="block text-xs font-semibold text-ink-muted mb-1.5">Username</label>
                   <div className="relative">
                     <User className="w-4 h-4 text-ink-dim absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
+                      id="auth-username"
                       type="text"
                       required
+                      minLength={3}
+                      maxLength={32}
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="creator101"
                       className="input-field pl-10"
+                      autoComplete="username"
                     />
                   </div>
+                  <p className="text-[10px] text-ink-dim mt-1">3–32 characters: letters, numbers, dot, dash or underscore.</p>
                 </div>
               )}
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-semibold text-ink-muted">Password</label>
+                  <label htmlFor="auth-password" className="block text-xs font-semibold text-ink-muted">Password</label>
                   {authMode === 'login' && (
                     <button
                       type="button"
-                      onClick={() => { setAuthMode('forgot'); setResetStep(1); setError(''); setSuccessMessage(''); }}
+                      onClick={() => switchMode('forgot')}
                       className="text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors"
                     >
                       Forgot password?
@@ -179,30 +243,38 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
                 <div className="relative">
                   <Lock className="w-4 h-4 text-ink-dim absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
+                    id="auth-password"
                     type="password"
                     required
+                    minLength={authMode === 'register' ? 8 : 1}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder={authMode === 'register' ? 'min 8 characters' : '••••••••'}
                     className="input-field pl-10"
+                    autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                   />
                 </div>
+                {authMode === 'register' && (
+                  <p className="text-[10px] text-ink-dim mt-1">At least 8 characters with a letter and a number.</p>
+                )}
               </div>
             </>
           )}
 
           {authMode === 'forgot' && resetStep === 1 && (
             <div>
-              <label className="block text-xs font-semibold text-ink-muted mb-1.5">Registered Email Address</label>
+              <label htmlFor="reset-email" className="block text-xs font-semibold text-ink-muted mb-1.5">Registered Email Address</label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-ink-dim absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
+                  id="reset-email"
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@domain.com"
                   className="input-field pl-10"
+                  autoComplete="email"
                 />
               </div>
             </div>
@@ -211,34 +283,38 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
           {authMode === 'forgot' && resetStep === 2 && (
             <>
               <div>
-                <label className="block text-xs font-semibold text-ink-muted mb-1.5">Reset Token</label>
+                <label htmlFor="reset-token" className="block text-xs font-semibold text-ink-muted mb-1.5">Reset Token</label>
                 <div className="relative">
                   <KeyRound className="w-4 h-4 text-ink-dim absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
+                    id="reset-token"
                     type="text"
                     required
                     value={resetToken}
                     onChange={(e) => setResetToken(e.target.value)}
-                    placeholder="Paste your reset token"
+                    placeholder="Paste the token from your email"
                     className="input-field pl-10 font-mono text-xs"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-ink-muted mb-1.5">New Password</label>
+                <label htmlFor="new-password" className="block text-xs font-semibold text-ink-muted mb-1.5">New Password</label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-ink-dim absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
+                    id="new-password"
                     type="password"
                     required
-                    minLength={6}
+                    minLength={8}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="•••••••• (min 6 chars)"
+                    placeholder="•••••••• (min 8 chars)"
                     className="input-field pl-10"
+                    autoComplete="new-password"
                   />
                 </div>
+                <p className="text-[10px] text-ink-dim mt-1">At least 8 characters with a letter and a number.</p>
               </div>
             </>
           )}
@@ -253,8 +329,8 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
             ) : (
               <>
                 {authMode === 'login' && <span>Sign In to Workspace</span>}
-                {authMode === 'register' && <span>Claim 75 Free Minutes</span>}
-                {authMode === 'forgot' && resetStep === 1 && <span>Generate Reset Token</span>}
+                {authMode === 'register' && <span>Create Free Account</span>}
+                {authMode === 'forgot' && resetStep === 1 && <span>Send Reset Link</span>}
                 {authMode === 'forgot' && resetStep === 2 && <span>Save New Password</span>}
                 <ArrowRight className="w-4 h-4" />
               </>
@@ -265,7 +341,7 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
             <div className="text-center pt-2">
               <button
                 type="button"
-                onClick={() => { setAuthMode('login'); setResetStep(1); setError(''); setSuccessMessage(''); }}
+                onClick={() => switchMode('login')}
                 className="text-xs font-semibold text-ink-muted hover:text-teal-600 transition-colors"
               >
                 ← Back to Sign In

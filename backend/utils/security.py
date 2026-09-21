@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import os
 import socket
+import time
 import ipaddress
 from urllib.parse import urlparse
 from fastapi import HTTPException, status
@@ -107,3 +111,42 @@ def validate_source_url(url: str) -> str:
         )
 
     return clean_url
+
+
+# ---------------------------------------------------------------------------
+# Signed download URLs (CODE_REVIEW.md finding C3)
+#
+# Generated/output files used to be served to anyone who knew (or guessed) the
+# filename. Download links are now HMAC-signed with an expiry and bound to the
+# owning user id. Set ALLOW_PUBLIC_FILE_URLS=1 only for local development.
+# ---------------------------------------------------------------------------
+
+
+def _file_url_secret() -> str:
+    secret = os.getenv("FILE_URL_SECRET") or os.getenv("JWT_SECRET_KEY") or ""
+    if not secret:
+        # Development fallback only; production requires JWT_SECRET_KEY anyway.
+        return "insecure-dev-file-url-secret"
+    return secret
+
+
+def sign_file_url(filename: str, user_id, ttl_seconds: int | None = None) -> str:
+    """Return a signed, expiring download path for ``filename`` owned by ``user_id``."""
+    exp = int(time.time()) + int(ttl_seconds or os.getenv("FILE_URL_TTL_SECONDS", "86400"))
+    payload = f"{filename}:{user_id}:{exp}"
+    sig = hmac.new(_file_url_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"/api/files/{filename}?exp={exp}&uid={user_id}&sig={sig}"
+
+
+def verify_file_signature(filename: str, uid: str | None, exp: str | None, sig: str | None) -> bool:
+    if not exp or not sig:
+        return False
+    try:
+        exp_int = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if exp_int < int(time.time()):
+        return False
+    payload = f"{filename}:{uid}:{exp_int}"
+    expected = hmac.new(_file_url_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+    return hmac.compare_digest(expected, str(sig))

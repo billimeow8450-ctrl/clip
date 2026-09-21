@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from ..database import get_db
 from ..auth import get_current_user
-from ..worker import process_clipper_job
+from ..worker import process_clipper_job, spawn_job
 from ..utils.security import validate_source_url
 
 router = APIRouter(prefix="/api/clipper", tags=["Clipper"])
@@ -78,7 +78,7 @@ async def process_clipper(
         )
         await db.commit()
 
-    asyncio.create_task(process_clipper_job(job_id, params, user["id"]))
+    spawn_job(process_clipper_job(job_id, params, user["id"]))
 
     return ClipperProcessResponse(
         job_id=job_id,

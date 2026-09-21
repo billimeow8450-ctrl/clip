@@ -4,7 +4,7 @@ services:
     name: clip-studio-backend
     runtime: python
     buildCommand: pip install -r backend/requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 2
     healthCheckPath: /api/health
     envVars:
       - key: ENVIRONMENT
@@ -13,16 +13,52 @@ services:
         sync: false # Set in Render Dashboard to your Supabase PostgreSQL connection URI
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: FILE_URL_SECRET
+        generateValue: true # Separate secret for signed download URLs
       - key: ALLOWED_ORIGINS
-        value: https://clip-studio-frontend.onrender.com,http://localhost:5173
+        value: https://clip-studio-frontend.onrender.com
+      - key: APP_BASE_URL
+        value: https://clip-studio-frontend.onrender.com # Used in reset emails
       - key: ENABLE_HEAVY_RENDERING
-        value: "0"
+        value: "0" # Set to 1 only once the render pipeline (ffmpeg/whisper) is provisioned
       - key: MAX_FILE_SIZE_MB
         value: "500"
+      - key: MAX_TOTAL_STORAGE_PER_USER_MB
+        value: "2048"
+      - key: MAX_FILES_PER_USER
+        value: "50"
+      - key: MAX_CONCURRENT_JOBS
+        value: "2"
+      - key: OUTPUT_RETENTION_HOURS
+        value: "24"
       - key: MAX_LOGIN_ATTEMPTS_PER_MIN
         value: "5"
       - key: MAX_REGISTRATIONS_PER_10MIN
         value: "3"
+      # Password-reset email delivery (finding C1): preferred transport is
+      # Resend (HTTP API). Paste your API key from dashboard.resend.com/api-keys.
+      # With no verified domain, Resend delivers only to your own account email.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false # e.g. "Clip Studio <no-reply@yourdomain.com>" once domain verified
+      # Classic SMTP fallback (SendGrid/Postmark/SES). Leave empty when using Resend.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # NEVER enable in production. Debug echo prints reset tokens to logs.
+      - key: RESET_TOKEN_DEBUG_ECHO
+        value: "0"
+      # Rate limiting behind Render's proxy: one trusted proxy hop.
+      - key: TRUSTED_PROXY_COUNT
+        value: "1"
 
   # 2. React + Vite Frontend Static Site
   - type: web

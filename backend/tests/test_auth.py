@@ -122,8 +122,12 @@ async def test_rate_limiting_on_login(client: AsyncClient, auth_user, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_forgot_and_reset_password_flow(client: AsyncClient, auth_user):
-    """Verify complete password reset workflow from token generation to credential update."""
+async def test_forgot_and_reset_password_flow(client: AsyncClient, auth_user, caplog):
+    """Reset tokens must be delivered by email, never returned in the API response
+    (CODE_REVIEW.md finding C1). In tests, RESET_TOKEN_DEBUG_ECHO=1 logs the token
+    so the flow can be completed end-to-end without an SMTP server."""
+    import logging
+
     clear_rate_limits()
 
     # 1. Request reset token
@@ -133,9 +137,22 @@ async def test_forgot_and_reset_password_flow(client: AsyncClient, auth_user):
     )
     assert forgot_res.status_code == 200
     forgot_data = forgot_res.json()
-    assert "reset_token" in forgot_data
-    token = forgot_data["reset_token"]
-    assert token is not None
+
+    # The response must NOT contain the token anymore (security regression guard)
+    assert "reset_token" not in forgot_data
+    assert forgot_data["message"]  # generic message present
+
+    # The token IS delivered via the email subsystem (echoed to logs in dev mode)
+    with caplog.at_level(logging.WARNING, logger="clip_studio.email"):
+        pass
+    tokens = [
+        rec.getMessage().split(": ", 1)[1].split(" (dev only")[0]
+        for rec in caplog.records
+        if "reset token for" in rec.getMessage()
+    ]
+    assert tokens, "expected reset token to be emitted via email subsystem"
+    token = tokens[-1]
+    assert token
 
     # 2. Reset password with new password
     new_password = "BrandNewSecurePassword2026!"

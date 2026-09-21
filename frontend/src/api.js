@@ -1,22 +1,26 @@
 function normalizeApiBaseUrl(value) {
   const raw = (value || '').trim().replace(/\/$/, '');
-  if (!raw) return 'http://localhost:8000';
+  if (!raw) return '';
   if (/^https?:\/\//i.test(raw)) return raw;
   return `https://${raw}`;
 }
 
-export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+// Empty VITE_API_BASE_URL means same-origin (deployments that proxy /api).
+// For local development, run_studio.sh / vite.config sets the default.
+export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
+  || (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 export function resolveApiUrl(path) {
   if (!path) return '';
   if (path === '#' || path.startsWith('blob:') || path.startsWith('data:')) return path;
   if (/^https?:\/\//i.test(path)) return path;
+  // Signed URLs (/api/files/x?exp=..&uid=..&sig=..) pass through with base prepended
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 function getAuthHeaders() {
   const token = localStorage.getItem('clip_auth_token');
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -26,11 +30,10 @@ function getAuthHeaders() {
 async function request(endpoint, options = {}) {
   const url = resolveApiUrl(endpoint);
   const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
-  
+
   if (options.body && !(options.body instanceof FormData) && typeof options.body === 'object') {
     options.body = JSON.stringify(options.body);
-  } else if (options.body instanceof FormData) {
-    delete headers['Content-Type'];
+    headers['Content-Type'] = 'application/json';
   }
 
   let response;
@@ -39,7 +42,7 @@ async function request(endpoint, options = {}) {
   } catch {
     throw new Error('Cannot reach the Clip Studio API. Check that the backend is running.');
   }
-  
+
   if (!response.ok) {
     if (response.status === 401) {
       localStorage.removeItem('clip_auth_token');
@@ -73,15 +76,25 @@ export const api = {
     async getMe() {
       return request('/api/auth/me');
     },
+    /**
+     * Server-side logout: revokes the JWT on the backend (finding C4/M7), then
+     * clears local session data. Local cleanup happens even if the network
+     * call fails, so the user is always logged out locally.
+     */
+    async logout() {
+      try {
+        await request('/api/auth/logout', { method: 'POST' });
+      } catch {
+        // Token may already be expired/invalid; local cleanup still applies.
+      }
+      localStorage.removeItem('clip_auth_token');
+      localStorage.removeItem('clip_user');
+    },
     async forgotPassword(email) {
       return request('/api/auth/forgot-password', { method: 'POST', body: { email } });
     },
     async resetPassword(data) {
       return request('/api/auth/reset-password', { method: 'POST', body: data });
-    },
-    logout() {
-      localStorage.removeItem('clip_auth_token');
-      localStorage.removeItem('clip_user');
     },
     getCurrentUser() {
       const user = localStorage.getItem('clip_user');
@@ -117,8 +130,12 @@ export const api = {
     async get(jobId) {
       return request(`/api/jobs/${jobId}`);
     },
-    async list() {
-      return request('/api/jobs');
+    async list(params = {}) {
+      const query = new URLSearchParams();
+      if (params.limit) query.set('limit', params.limit);
+      if (params.offset) query.set('offset', params.offset);
+      const qs = query.toString();
+      return request(`/api/jobs${qs ? `?${qs}` : ''}`);
     }
   },
 
@@ -138,7 +155,10 @@ export const api = {
     async upload(file) {
       const formData = new FormData();
       formData.append('file', file);
-      return request('/api/upload', { method: 'POST', body: formData });
+      const res = await request('/api/upload', { method: 'POST', body: formData });
+      // Backend now returns a signed, expiring download URL (`url`) plus the
+      // bare id path (`url_base`). Prefer the signed URL for downloads.
+      return res;
     }
   }
 };

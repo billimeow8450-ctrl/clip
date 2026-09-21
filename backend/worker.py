@@ -16,6 +16,7 @@ if str(SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIR))
 
 from .database import get_db
+from .utils.security import sign_file_url
 
 logger = logging.getLogger("clip_studio.worker")
 
@@ -27,6 +28,32 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "storage" / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR = Path(__file__).resolve().parent / "storage" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Bounded job concurrency (CODE_REVIEW.md finding M4): previously every job was
+# a fire-and-forget asyncio.create_task with no cap and no strong reference.
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
+JOB_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+_BG_TASKS: set = set()
+
+FALLBACK_THUMBNAIL = (
+    "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80"
+)
+SIMULATION_NOTICE = (
+    "Simulation mode: these results are placeholders, not derived from your media. "
+    "Set ENABLE_HEAVY_RENDERING=1 on the server for real processing."
+)
+
+
+def spawn_job(coro) -> None:
+    """Launch a background job with a strong reference and the global concurrency cap."""
+
+    async def _run() -> None:
+        async with JOB_SEMAPHORE:
+            await coro
+
+    task = asyncio.create_task(_run())
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
 
 
 async def update_job_status(
@@ -56,6 +83,90 @@ async def update_job_status(
         await db.commit()
 
 
+def _resolve_input_file(source_url: Optional[str]) -> Optional[Path]:
+    """Map a source URL/path to an existing upload on disk."""
+    if not source_url:
+        return None
+    if "/api/files/" in source_url or source_url.startswith("up_"):
+        fname = os.path.basename(source_url.split("?")[0])
+        candidate = UPLOAD_DIR / fname
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _parse_target_len(target_duration: Optional[str]) -> float:
+    """Robustly parse the requested clip length; always returns a positive float."""
+    try:
+        value = float(str(target_duration or "60").strip())
+    except (TypeError, ValueError):
+        return 60.0
+    if value <= 0:
+        return 60.0
+    return value
+
+
+async def recover_stuck_jobs() -> int:
+    """Recover jobs left in queued/processing by a restart (finding M4).
+
+    In simulation mode the pipeline is short, so jobs are simply re-run.
+    With heavy rendering a job may exceed a process lifetime; those are marked
+    failed with a clear message instead of hanging forever.
+    """
+    recovered = 0
+    async with await get_db() as db:
+        cursor = await db.execute(
+            "SELECT id, type, input_params, user_id FROM jobs WHERE status IN ('queued', 'processing')"
+        )
+        rows = await cursor.fetchall()
+
+    for row in rows:
+        try:
+            params = json.loads(row["input_params"] or "{}")
+        except Exception:
+            params = {}
+
+        if ENABLE_HEAVY_RENDERING:
+            await update_job_status(
+                row["id"],
+                "failed",
+                100.0,
+                "Interrupted by server restart",
+                error_message="Server restarted during processing; please resubmit the job.",
+            )
+            recovered += 1
+            continue
+
+        if row["type"] == "clipper":
+            spawn_job(process_clipper_job(row["id"], params, row["user_id"]))
+            recovered += 1
+        elif row["type"] == "editor":
+            spawn_job(process_editor_job(row["id"], params, row["user_id"]))
+            recovered += 1
+        elif row["type"] == "transcript":
+            spawn_job(process_transcript_job(row["id"], params, row["user_id"]))
+            recovered += 1
+        else:
+            await update_job_status(row["id"], "failed", 100.0, "Unknown job type")
+            recovered += 1
+
+    return recovered
+
+
+async def cleanup_finished_jobs(max_age_hours: float = 24.0) -> int:
+    """Delete generated output artifacts past the retention window to bound disk use."""
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    for path in OUTPUT_DIR.iterdir():
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) -> None:
     """Process an AI Video Editor job (File or YouTube Range + MasterEngine reframing)."""
     try:
@@ -63,8 +174,8 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
 
         source_type = params.get("source_type")  # 'youtube' or 'file'
         source_url = params.get("source_url")
-        start_seconds = float(params.get("start_seconds", 0))
-        end_seconds = float(params.get("end_seconds", 60))
+        start_seconds = float(params.get("start_seconds", 0) or 0)
+        end_seconds = float(params.get("end_seconds", 60) or 60)
         caption_style = params.get("caption_style", "hormozi")
         layout_mode = params.get("layout_mode", "focus")
 
@@ -76,14 +187,7 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                 from master_engine.engine import MasterEngine
                 from master_engine.config import Settings
 
-                # Check if input file exists in uploads
-                input_file = None
-                if source_url and ("/api/files/" in source_url or "up_" in source_url):
-                    fname = os.path.basename(source_url)
-                    candidate = UPLOAD_DIR / fname
-                    if candidate.exists():
-                        input_file = candidate
-
+                input_file = _resolve_input_file(source_url)
                 output_file = OUTPUT_DIR / f"edited_{job_id}.mp4"
 
                 if input_file and input_file.exists():
@@ -92,7 +196,7 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                     engine = MasterEngine(settings=settings)
                     await asyncio.to_thread(engine.process, input_file, output_file)
                     result = {
-                        "output_video": f"/api/files/edited_{job_id}.mp4",
+                        "output_video": sign_file_url(f"edited_{job_id}.mp4", user_id),
                         "duration": duration,
                         "caption_style": caption_style,
                         "layout": layout_mode,
@@ -100,22 +204,22 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                     }
                 else:
                     result = {
-                        "output_video": f"/api/files/sample_edited_{job_id}.mp4",
+                        "output_video": None,
                         "duration": duration,
                         "caption_style": caption_style,
                         "layout": layout_mode,
                         "is_simulation": True,
-                        "message": "Heavy engine prepared; source video stream processed.",
+                        "message": "Source video file was not found on the server; nothing was rendered.",
                     }
             except Exception as engine_err:
                 logger.warning(f"MasterEngine execution fallback: {engine_err}")
                 result = {
-                    "output_video": f"/api/files/sample_edited_{job_id}.mp4",
+                    "output_video": None,
                     "duration": duration,
                     "caption_style": caption_style,
                     "layout": layout_mode,
                     "is_simulation": True,
-                    "message": f"Fell back safely: {str(engine_err)[:100]}",
+                    "message": f"Rendering failed: {str(engine_err)[:100]}",
                 }
         else:
             # Laptop-Safe Simulation mode for UI/UX testing without cooking hardware
@@ -128,7 +232,7 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
             await asyncio.sleep(0.8)
 
             result = {
-                "output_video": f"/api/files/sample_edited_{job_id}.mp4",
+                "output_video": None,
                 "title": params.get("title", "Edited Clip"),
                 "duration": duration,
                 "start_seconds": start_seconds,
@@ -136,7 +240,7 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                 "caption_style": caption_style,
                 "layout": layout_mode,
                 "is_simulation": True,
-                "message": "Processed successfully in laptop-safe mode. Full rendering ready for deployment server.",
+                "message": SIMULATION_NOTICE,
             }
 
         await update_job_status(job_id, "completed", 100.0, "Completed", result_data=result)
@@ -152,11 +256,10 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
         await update_job_status(job_id, "processing", 10.0, "Ingesting video & research signals...")
 
         url = params.get("url")
-        analysis_mode = params.get("analysis_mode", "quick")
-        target_duration = str(params.get("target_duration", "60"))  # 30, 60, 90, 120, all
-        target_len = float(target_duration) if target_duration.isdigit() else 60.0
+        target_duration = str(params.get("target_duration", "60"))
+        target_len = _parse_target_len(target_duration)
 
-        clips = []
+        clips: list = []
 
         if ENABLE_HEAVY_RENDERING:
             await update_job_status(job_id, "processing", 30.0, "Executing viral research engine & comment scoring...")
@@ -165,7 +268,7 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
                 from .routers.youtube import extract_video_id
 
                 video_id = extract_video_id(url) if url else None
-                research_data = {}
+                research_data: Dict[str, Any] = {}
                 if video_id:
                     research_data = await asyncio.to_thread(
                         collect_research, url, video_id, params.get("title", "Video")
@@ -180,19 +283,21 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
                         clip_id = f"clip_{uuid.uuid4().hex[:8]}"
                         clips.append({
                             "id": clip_id,
-                            "title": f"Viral Moment #{idx+1} ({int(score)}% engagement)",
+                            "title": f"Viral Moment #{idx + 1} ({int(score)}% engagement)",
                             "start_time": round(st, 1),
                             "end_time": round(en, 1),
                             "duration": round(en - st, 1),
                             "viral_score": round(score, 1),
                             "hook_text": f"High retention spike at {int(ts)}s from viral comments analysis",
-                            "video_url": f"/api/files/{clip_id}.mp4",
-                            "thumbnail_url": params.get("thumbnail_url") or "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
+                            "video_url": None,  # rendered outputs are attached below if produced
+                            "thumbnail_url": params.get("thumbnail_url") or FALLBACK_THUMBNAIL,
+                            "is_sample": False,
                         })
             except Exception as research_err:
                 logger.warning(f"Viral research engine warning: {research_err}; generating structured clips.")
 
-        # If clips are still empty (simulation mode, or no comment scores), generate realistic clips
+        # If clips are still empty (simulation mode, or no comment scores), produce
+        # clearly-labeled placeholder segments instead of fabricated "viral" data.
         if not clips:
             await asyncio.sleep(1.0)
             await update_job_status(job_id, "processing", 30.0, "Scraping audience retention & finding viral hooks...")
@@ -202,41 +307,21 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
             await update_job_status(job_id, "processing", 85.0, "Reframing active speakers to vertical 9:16...")
             await asyncio.sleep(0.8)
 
-            clips = [
-                {
+            offsets = (42.0, 185.0, 360.0)
+            scores = (97.4, 93.1, 89.5)
+            for idx, (offset, score) in enumerate(zip(offsets, scores)):
+                clips.append({
                     "id": f"clip_{uuid.uuid4().hex[:8]}",
-                    "title": "The Secret Formula Nobody Talks About",
-                    "start_time": 42.0,
-                    "end_time": round(42.0 + target_len, 1),
+                    "title": f"Demo Segment #{idx + 1}",
+                    "start_time": offset,
+                    "end_time": round(offset + target_len, 1),
                     "duration": target_len,
-                    "viral_score": 97.4,
-                    "hook_text": "Nobody tells you this about scaling...",
-                    "video_url": "/api/files/sample_clip_1.mp4",
-                    "thumbnail_url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
-                },
-                {
-                    "id": f"clip_{uuid.uuid4().hex[:8]}",
-                    "title": "Why Most Creators Fail in 2026",
-                    "start_time": 185.0,
-                    "end_time": round(185.0 + target_len, 1),
-                    "duration": target_len,
-                    "viral_score": 93.1,
-                    "hook_text": "This mistake is costing you thousands...",
-                    "video_url": "/api/files/sample_clip_2.mp4",
-                    "thumbnail_url": "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80",
-                },
-                {
-                    "id": f"clip_{uuid.uuid4().hex[:8]}",
-                    "title": "The Shocking Truth Revealed",
-                    "start_time": 360.0,
-                    "end_time": round(360.0 + target_len, 1),
-                    "duration": target_len,
-                    "viral_score": 89.5,
-                    "hook_text": "Watch what happens next...",
-                    "video_url": "/api/files/sample_clip_3.mp4",
-                    "thumbnail_url": "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80",
-                },
-            ]
+                    "viral_score": score,
+                    "hook_text": "SIMULATION DATA — enable ENABLE_HEAVY_RENDERING for real analysis",
+                    "video_url": None,
+                    "thumbnail_url": None,
+                    "is_sample": True,
+                })
 
         # Save clips in DB
         async with await get_db() as db:
@@ -266,6 +351,7 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
             "clips_count": len(clips),
             "clips": clips,
             "is_simulation": not ENABLE_HEAVY_RENDERING,
+            "simulation_notice": SIMULATION_NOTICE if not ENABLE_HEAVY_RENDERING else None,
         }
         await update_job_status(job_id, "completed", 100.0, "Completed", result_data=result)
 
@@ -280,7 +366,6 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
         await update_job_status(job_id, "processing", 15.0, "Extracting audio track...")
 
         language = params.get("language", "en")
-        export_format = params.get("export_format", "txt")
         url_or_file = params.get("url_or_file", "")
 
         transcript_segments = None
@@ -290,12 +375,7 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
             try:
                 from master_engine.transcribe import transcribe
 
-                input_file = None
-                if url_or_file and ("/api/files/" in url_or_file or "up_" in url_or_file):
-                    fname = os.path.basename(url_or_file)
-                    candidate = UPLOAD_DIR / fname
-                    if candidate.exists():
-                        input_file = candidate
+                input_file = _resolve_input_file(url_or_file)
 
                 if input_file and input_file.exists():
                     await update_job_status(job_id, "processing", 40.0, "Running Whisper transcription...")
@@ -313,23 +393,27 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
             await update_job_status(job_id, "processing", 80.0, "Aligning word-level timestamps & formatting...")
             await asyncio.sleep(0.8)
 
+            sim_text = "SIMULATION — real transcription requires ENABLE_HEAVY_RENDERING=1."
             transcript_segments = [
-                {"start": "00:00:01", "end": "00:00:05", "speaker": "Speaker 1", "text": "Welcome back everybody to another deep dive episode."},
-                {"start": "00:00:05", "end": "00:00:12", "speaker": "Speaker 1", "text": "Today we are breaking down the exact strategy behind short-form virality in 2026."},
-                {"start": "00:00:12", "end": "00:00:18", "speaker": "Speaker 2", "text": "Right, because the algorithms have completely shifted away from generic trends."},
-                {"start": "00:00:18", "end": "00:00:26", "speaker": "Speaker 1", "text": "Exactly. Now it is all about viewer retention, clean visual pacing, and high-energy captions."},
-                {"start": "00:00:26", "end": "00:00:34", "speaker": "Speaker 2", "text": "If you lose the viewer in the first 3 seconds, the clip is essentially dead in the water."},
-                {"start": "00:00:34", "end": "00:00:45", "speaker": "Speaker 1", "text": "Which is why automatic face tracking and dynamic split screens make such a massive difference."},
+                {"start": "00:00:01", "end": "00:00:05", "speaker": "Speaker 1", "text": sim_text},
+                {"start": "00:00:05", "end": "00:00:12", "speaker": "Speaker 1", "text": sim_text},
+                {"start": "00:00:12", "end": "00:00:18", "speaker": "Speaker 2", "text": sim_text},
+                {"start": "00:00:18", "end": "00:00:26", "speaker": "Speaker 1", "text": sim_text},
+                {"start": "00:00:26", "end": "00:00:34", "speaker": "Speaker 2", "text": sim_text},
+                {"start": "00:00:34", "end": "00:00:45", "speaker": "Speaker 1", "text": sim_text},
             ]
             full_text = " ".join([s["text"] for s in transcript_segments])
 
-        # Write actual export files to storage/outputs
+        # Write actual export files to storage/outputs (these DO exist and are
+        # served through signed URLs, unlike the old fake sample paths).
         txt_path = OUTPUT_DIR / f"transcript_{job_id}.txt"
         srt_path = OUTPUT_DIR / f"transcript_{job_id}.srt"
         txt_path.write_text(full_text, encoding="utf-8")
         srt_content = []
         for i, s in enumerate(transcript_segments, 1):
-            srt_content.append(f"{i}\n{s.get('start', '00:00:00')} --> {s.get('end', '00:00:05')}\n{s.get('text', '')}\n")
+            srt_content.append(
+                f"{i}\n{s.get('start', '00:00:00')} --> {s.get('end', '00:00:05')}\n{s.get('text', '')}\n"
+            )
         srt_path.write_text("\n".join(srt_content), encoding="utf-8")
 
         result = {
@@ -337,10 +421,11 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
             "segments": transcript_segments,
             "full_text": full_text,
             "export_files": {
-                "txt": f"/api/files/transcript_{job_id}.txt",
-                "srt": f"/api/files/transcript_{job_id}.srt",
+                "txt": sign_file_url(f"transcript_{job_id}.txt", user_id),
+                "srt": sign_file_url(f"transcript_{job_id}.srt", user_id),
             },
             "is_simulation": not ENABLE_HEAVY_RENDERING,
+            "simulation_notice": SIMULATION_NOTICE if not ENABLE_HEAVY_RENDERING else None,
         }
 
         await update_job_status(job_id, "completed", 100.0, "Completed", result_data=result)
