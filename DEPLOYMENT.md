@@ -1,8 +1,12 @@
 # Deployment Guide — Supabase (DB) + Resend (email) + Render (hosting)
 
-> **About account access:** I can't log into Supabase, Resend, or Render for you
-> (no browser/account access in this environment) — but everything below is
-> copy-paste. Budget: **~10 minutes** across the three dashboards.
+> **Live deployment (Sept 22, 2026):**
+> - Backend: https://clip-studio-backend-jayd.onrender.com/api/health
+> - Frontend: https://clip-studio-frontend.onrender.com
+> - Database: Supabase project `clip-studio-ai-db` (ap-south-1), schema applied
+> - Email: Resend, verified sender domain `auth.manthanventures.in`
+>
+> Everything below is the reference checklist for redeploying from scratch.
 
 ---
 
