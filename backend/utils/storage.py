@@ -6,6 +6,7 @@ to use the application-owned signed download endpoint.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -54,9 +55,16 @@ async def upload_file(object_key: str, source: Path, content_type: str = "applic
         return
     url, key, bucket = config
     headers = {**_headers(key), "Content-Type": content_type, "x-upsert": "true"}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=15.0)) as client:
+
+    async def file_chunks():
+        # httpx.AsyncClient requires an async byte stream. Passing a regular
+        # file handle raises at runtime and made every production upload fail.
         with source.open("rb") as handle:
-            response = await client.put(_object_url(url, bucket, object_key), content=handle, headers=headers)
+            while chunk := await asyncio.to_thread(handle.read, 1024 * 1024):
+                yield chunk
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=15.0)) as client:
+        response = await client.put(_object_url(url, bucket, object_key), content=file_chunks(), headers=headers)
     if response.status_code not in (200, 201):
         raise StorageError(f"Object upload failed ({response.status_code})")
 
