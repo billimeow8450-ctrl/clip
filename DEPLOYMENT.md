@@ -84,8 +84,9 @@ The backend already supports Resend natively (HTTP API — no SMTP ports to open
 1. **New → Static Site** → same repo. Render reads `render.yaml`: build
    `cd frontend && npm install && npm run build`, publish `frontend/dist`,
    rewrite `/* → /index.html`.
-2. `VITE_API_BASE_URL` is pulled from the backend service automatically
-   (`fromService` in `render.yaml`). If creating manually, set it to your backend URL.
+2. `VITE_API_BASE_URL` is pinned in `render.yaml` to the live backend URL. If the
+   backend service is recreated or given a custom domain, update that value and
+   redeploy the static site.
 3. Deploy, then open the site and register a real account — the user lands in Supabase.
 
 ---

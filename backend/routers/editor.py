@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import uuid
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from ..database import get_db
 from ..auth import get_current_user
 from ..worker import process_editor_job, spawn_job
+from ..utils.sources import validate_owned_source
 
 router = APIRouter(prefix="/api/editor", tags=["Editor"])
 
@@ -37,12 +39,21 @@ async def process_editor(
     req: EditorProcessRequest,
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> EditorProcessResponse:
+    if req.source_type not in {"youtube", "file"}:
+        raise HTTPException(status_code=400, detail="Source type must be 'youtube' or 'file'.")
+
+    if not math.isfinite(req.start_seconds) or not math.isfinite(req.end_seconds) or req.start_seconds < 0:
+        raise HTTPException(status_code=400, detail="Timestamps must be finite, non-negative values.")
+
     if req.end_seconds <= req.start_seconds:
         raise HTTPException(status_code=400, detail="End timestamp must be greater than start timestamp.")
 
     duration = req.end_seconds - req.start_seconds
     if duration > 600:  # 10 min cap per single clip
         raise HTTPException(status_code=400, detail="Maximum clip duration is 10 minutes.")
+
+    clean_source = await validate_owned_source(req.source_url, user)
+    req.source_url = clean_source
 
     job_id = f"job_ed_{uuid.uuid4().hex[:10]}"
     project_id = f"proj_{uuid.uuid4().hex[:8]}"

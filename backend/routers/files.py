@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response, StreamingResponse
 
 from ..database import get_db
 from ..auth import get_current_user, get_optional_user
@@ -127,9 +127,9 @@ async def upload_file(
     except HTTPException:
         dest_path.unlink(missing_ok=True)
         raise
-    except Exception as exc:
+    except Exception:
         dest_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(exc)}")
+        raise HTTPException(status_code=500, detail="Upload failed. Please try again.")
 
     # Content must match the declared media format
     if not _magic_ok(head, ext):
@@ -223,8 +223,28 @@ async def get_file(
     if media_path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    media_type = "video/mp4" if media_path.suffix.lower() in (".mp4", ".mov", ".mkv", ".webm", ".avi") else None
-    return FileResponse(media_path, media_type=media_type, filename=clean_name)
+    media_type = "video/mp4" if media_path.suffix.lower() in (".mp4", ".mov", ".mkv", ".webm", ".avi") else "application/octet-stream"
+
+    # Small artifacts are returned directly. This makes tiny transcript/test
+    # downloads fast and avoids a Starlette streaming deadlock in Python 3.14's
+    # in-process ASGI transport. Large media remains constant-memory streamed.
+    headers = {"Content-Disposition": f'attachment; filename="{clean_name}"'}
+    if media_path.stat().st_size <= 8 * 1024 * 1024:
+        return Response(content=media_path.read_bytes(), media_type=media_type, headers=headers)
+
+    # StreamingResponse avoids Starlette's sendfile extension, which hangs
+    # under the in-process ASGI transport used by our test environment while
+    # retaining constant-memory downloads in production.
+    def stream_file():
+        with media_path.open("rb") as handle:
+            while chunk := handle.read(CHUNK_SIZE):
+                yield chunk
+
+    return StreamingResponse(
+        stream_file(),
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 @router.delete("/files/{filename}")

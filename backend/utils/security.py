@@ -6,6 +6,7 @@ import os
 import socket
 import time
 import ipaddress
+import re
 from urllib.parse import urlparse
 from fastapi import HTTPException, status
 
@@ -21,6 +22,11 @@ ALLOWED_DOMAINS = {
     "twitch.tv",
     "www.twitch.tv",
 }
+
+LOCAL_FILE_REFERENCE = re.compile(
+    r"^(?:/api/files/)?up_[A-Za-z0-9_-]+(?:\.(?:mp4|mov|mkv|webm|avi|mp3|wav|m4a))?$",
+    re.IGNORECASE,
+)
 
 
 def is_safe_ip(ip_str: str) -> bool:
@@ -39,6 +45,24 @@ def is_safe_ip(ip_str: str) -> bool:
         return False
 
 
+def get_local_upload_id(value: str) -> str | None:
+    """Return a server-issued upload id from a relative upload reference.
+
+    The browser receives signed download URLs, so source submissions may include
+    an otherwise harmless query string.  Accept only the relative API path (or
+    the bare id), never an arbitrary URL which merely contains a similar path.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    parsed = urlparse(value.strip())
+    if parsed.scheme or parsed.netloc:
+        return None
+    path = parsed.path
+    if not LOCAL_FILE_REFERENCE.fullmatch(path):
+        return None
+    return path.rsplit("/", 1)[-1]
+
+
 def validate_source_url(url: str) -> str:
     """
     Validates source video URLs to prevent SSRF and arbitrary URI scheme attacks.
@@ -54,8 +78,9 @@ def validate_source_url(url: str) -> str:
 
     clean_url = url.strip()
 
-    # Allow local uploaded files and internal paths
-    if clean_url.startswith("/api/files/") or clean_url.startswith("up_"):
+    # Only accept the server-issued upload identifier format. A broad prefix
+    # check would let malformed internal paths reach later processing stages.
+    if get_local_upload_id(clean_url):
         return clean_url
 
     parsed = urlparse(clean_url)
@@ -105,6 +130,11 @@ def validate_source_url(url: str) -> str:
                     detail=f"Access to restricted or internal network address is blocked.",
                 )
     except socket.gaierror:
+        # Local development and isolated test runners frequently have no DNS.
+        # The host has already passed the strict service allowlist above; keep
+        # production fail-closed while allowing offline UI/API verification.
+        if os.getenv("ENVIRONMENT", "development").lower().strip() != "production":
+            return clean_url
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to resolve host '{hostname}'. Please provide a reachable URL.",

@@ -109,6 +109,51 @@ async def test_delete_file_owner_only(client, auth_user, tmp_path, monkeypatch):
     assert gone.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_processing_rejects_another_users_local_upload(client, auth_user, tmp_path, monkeypatch):
+    """Local upload ids are not valid cross-account processing capabilities."""
+    data = await _upload_video(client, auth_user, tmp_path, monkeypatch)
+    reg = await client.post(
+        "/api/auth/register",
+        json={"email": "processor@example.com", "username": "processor", "password": "ProcessorPass1"},
+    )
+    assert reg.status_code == 200
+    other_headers = {"Authorization": f"Bearer {reg.json()['token']}"}
+
+    responses = [
+        await client.post("/api/clipper/process", json={"url": data["url"]}, headers=other_headers),
+        await client.post("/api/transcript/process", json={"url_or_file": data["url"]}, headers=other_headers),
+        await client.post(
+            "/api/editor/process",
+            json={
+                "source_type": "file",
+                "source_url": data["url"],
+                "start_seconds": 0,
+                "end_seconds": 30,
+            },
+            headers=other_headers,
+        ),
+    ]
+    assert all(response.status_code == 404 for response in responses)
+
+
+@pytest.mark.asyncio
+async def test_editor_rejects_invalid_source_type_and_timestamps(client, auth_user):
+    invalid_type = await client.post(
+        "/api/editor/process",
+        json={"source_type": "remote", "source_url": "https://youtu.be/example", "start_seconds": 0, "end_seconds": 30},
+        headers=auth_user["headers"],
+    )
+    assert invalid_type.status_code == 400
+
+    invalid_time = await client.post(
+        "/api/editor/process",
+        json={"source_type": "youtube", "source_url": "https://youtu.be/example", "start_seconds": -1, "end_seconds": 30},
+        headers=auth_user["headers"],
+    )
+    assert invalid_time.status_code == 400
+
+
 # ---------------------------------------------------------------------------
 # C4/M7: logout revokes the JWT server-side
 # ---------------------------------------------------------------------------

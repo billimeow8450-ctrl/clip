@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from ..database import get_db
 from ..auth import get_current_user
 from ..worker import process_transcript_job, spawn_job
-from ..utils.security import validate_source_url
+from ..utils.sources import validate_owned_source
 
 router = APIRouter(prefix="/api/transcript", tags=["Transcript"])
 
@@ -35,7 +35,7 @@ async def process_transcript(
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> TranscriptProcessResponse:
     # SSRF prevention check
-    clean_target = validate_source_url(req.url_or_file)
+    clean_target = await validate_owned_source(req.url_or_file, user)
     req.url_or_file = clean_target
 
     job_id = f"job_trans_{uuid.uuid4().hex[:10]}"

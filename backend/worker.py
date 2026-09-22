@@ -16,7 +16,7 @@ if str(SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIR))
 
 from .database import get_db
-from .utils.security import sign_file_url
+from .utils.security import get_local_upload_id, sign_file_url
 
 logger = logging.getLogger("clip_studio.worker")
 
@@ -85,13 +85,12 @@ async def update_job_status(
 
 def _resolve_input_file(source_url: Optional[str]) -> Optional[Path]:
     """Map a source URL/path to an existing upload on disk."""
-    if not source_url:
+    upload_id = get_local_upload_id(source_url or "")
+    if not upload_id:
         return None
-    if "/api/files/" in source_url or source_url.startswith("up_"):
-        fname = os.path.basename(source_url.split("?")[0])
-        candidate = UPLOAD_DIR / fname
-        if candidate.exists():
-            return candidate
+    candidate = (UPLOAD_DIR / upload_id).resolve()
+    if candidate.parent == UPLOAD_DIR.resolve() and candidate.is_file():
+        return candidate
     return None
 
 
@@ -194,7 +193,10 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                     await update_job_status(job_id, "processing", 45.0, "Rendering with MasterEngine...")
                     settings = Settings(fps=30.0, width=1080, height=1920)
                     engine = MasterEngine(settings=settings)
-                    await asyncio.to_thread(engine.process, input_file, output_file)
+                    # ``MasterEngine`` exposes ``run_job``/``run``; an earlier
+                    # integration called a nonexistent ``process`` method, so
+                    # heavy rendering always fell back to a fake result.
+                    await asyncio.to_thread(engine.run_job, input_file, output_file)
                     result = {
                         "output_video": sign_file_url(f"edited_{job_id}.mp4", user_id),
                         "duration": duration,

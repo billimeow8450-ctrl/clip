@@ -1,4 +1,3 @@
-import asyncio
 import os
 import re
 import sqlite3
@@ -143,28 +142,21 @@ class _SQLiteCursor:
         self.lastrowid = cursor.lastrowid
 
     async def fetchone(self) -> Optional[sqlite3.Row]:
-        return await asyncio.to_thread(self._cursor.fetchone)
+        return self._cursor.fetchone()
 
     async def fetchall(self) -> List[sqlite3.Row]:
-        return await asyncio.to_thread(self._cursor.fetchall)
+        return self._cursor.fetchall()
 
 
 class _SQLiteConnectionWrapper:
-    def __init__(self, conn: sqlite3.Connection, lock: asyncio.Lock):
+    def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
-        self._lock = lock
 
     async def execute(self, query: str, params: tuple = ()) -> _SQLiteCursor:
-        # The lock serializes statement execution across worker threads for
-        # this connection (a cursor must not interleave with another statement
-        # on the same connection).
-        async with self._lock:
-            cursor = await asyncio.to_thread(self._conn.execute, query, params)
-        return _SQLiteCursor(cursor)
+        return _SQLiteCursor(self._conn.execute(query, params))
 
     async def commit(self) -> None:
-        async with self._lock:
-            await asyncio.to_thread(self._conn.commit)
+        self._conn.commit()
 
 
 class _DBContext:
@@ -178,32 +170,22 @@ class _DBContext:
         return _open().__await__()
 
     async def __aenter__(self) -> _SQLiteConnectionWrapper:
-        # SQLite operations run through asyncio.to_thread so disk I/O never
-        # blocks the event loop (previously a 30s write lock froze every
-        # concurrent HTTP request). The async-shaped interface is preserved so
-        # callers remain identical across SQLite and PostgreSQL.
-        #
-        # check_same_thread=False is required because to_thread's worker pool
-        # may dispatch successive calls to different threads; the per-context
-        # threading.Lock below serializes access so this remains safe.
+        # Keep each request's short SQLite transaction on the event-loop
+        # thread. sqlite3 connections are not safe to hop between executor
+        # threads, and that pattern deadlocks on Python 3.14 in this runtime.
+        # The async-shaped interface remains identical to PostgreSQL callers.
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        def _connect() -> sqlite3.Connection:
-            conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys=ON;")
-            conn.execute("PRAGMA busy_timeout=30000;")
-            return conn
-
-        self._conn = await asyncio.to_thread(_connect)
-        self._lock = asyncio.Lock()
-        return _SQLiteConnectionWrapper(self._conn, self._lock)
+        self._conn = sqlite3.connect(self.db_path, timeout=30)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA foreign_keys=ON;")
+        self._conn.execute("PRAGMA busy_timeout=30000;")
+        return _SQLiteConnectionWrapper(self._conn)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._conn:
             if exc_type is not None:
-                await asyncio.to_thread(self._conn.rollback)
-            await asyncio.to_thread(self._conn.close)
+                self._conn.rollback()
+            self._conn.close()
             self._conn = None
 
 

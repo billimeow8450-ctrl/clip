@@ -71,8 +71,7 @@ services:
         source: /*
         destination: /index.html
     envVars:
+      # Keep this explicit because Render's generated host can change when a
+      # service is recreated; this is the current live backend URL.
       - key: VITE_API_BASE_URL
-        fromService:
-          type: web
-          name: clip-studio-backend
-          property: host
+        value: https://clip-studio-backend-jayd.onrender.com

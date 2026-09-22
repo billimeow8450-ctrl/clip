@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from ..database import get_db
 from ..auth import get_current_user
 from ..worker import process_clipper_job, spawn_job
-from ..utils.security import validate_source_url
+from ..utils.sources import validate_owned_source
 
 router = APIRouter(prefix="/api/clipper", tags=["Clipper"])
 
@@ -36,7 +36,7 @@ async def process_clipper(
     user: Dict[str, Any] = Depends(get_current_user),
 ) -> ClipperProcessResponse:
     # SSRF prevention check
-    clean_url = validate_source_url(req.url)
+    clean_url = await validate_owned_source(req.url, user)
     req.url = clean_url
 
     job_id = f"job_clip_{uuid.uuid4().hex[:10]}"
