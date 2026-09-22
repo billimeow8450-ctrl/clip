@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request, status
@@ -15,6 +16,7 @@ from ..utils.security import sign_file_url, verify_file_signature
 from ..utils.storage import create_download_url, delete_file as delete_stored_file, upload_file as upload_stored_file, using_object_storage
 
 router = APIRouter(prefix="/api", tags=["Files"])
+logger = logging.getLogger("clip_studio.files")
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "storage" / "uploads"
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "storage" / "outputs"
@@ -151,6 +153,7 @@ async def upload_file(
             dest_path.replace(final_path)
             dest_path = final_path
     except Exception:
+        logger.exception("Durable upload failed for %s", file_id)
         dest_path.unlink(missing_ok=True)
         raise HTTPException(status_code=503, detail="Media storage is temporarily unavailable. Please try again.")
 
