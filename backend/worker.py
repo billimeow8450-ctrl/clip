@@ -163,7 +163,8 @@ async def _resolve_input_file(source_url: Optional[str], job_id: str) -> Optiona
 async def _persist_output(path: Path, filename: str) -> None:
     """Move generated artifacts to durable storage before publishing job results."""
     if using_object_storage():
-        await upload_stored_file(f"outputs/{filename}", path)
+        content_type = "video/mp4" if filename.endswith(".mp4") else "application/octet-stream"
+        await upload_stored_file(f"outputs/{filename}", path, content_type)
         path.unlink(missing_ok=True)
 
 
