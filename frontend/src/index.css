@@ -283,6 +283,12 @@
   box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.15);
 }
 
+/* Inputs with a leading icon must reserve space in the component itself.
+   Relying on utility padding here let the base input padding win in production. */
+.input-field.has-leading-icon {
+  padding-left: 2.75rem;
+}
+
 /* Badges */
 .badge-blue {
   display: inline-flex;

@@ -221,16 +221,24 @@ async def _run_migrations(db) -> None:
     except Exception:
         pass  # Column already exists (SQLite raises, PG we use IF NOT EXISTS below)
 
+    for column in ("oauth_provider VARCHAR(32)", "oauth_subject VARCHAR(255)"):
+        try:
+            await db.execute(f"ALTER TABLE users ADD COLUMN {column}")
+        except Exception:
+            pass
+
     if is_postgres():
         await db.execute(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0"
         )
+        await db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider VARCHAR(32)")
+        await db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_subject VARCHAR(255)")
         # The API connects directly to Postgres; the browser must never gain
         # access through Supabase's generated REST roles.
-        for table in ("users", "projects", "jobs", "clips", "files", "password_resets", "revoked_tokens"):
+        for table in ("users", "projects", "jobs", "clips", "files", "password_resets", "revoked_tokens", "oauth_login_codes"):
             await db.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         await db.execute(
-            "REVOKE ALL ON TABLE users, projects, jobs, clips, files, password_resets, revoked_tokens FROM anon, authenticated"
+            "REVOKE ALL ON TABLE users, projects, jobs, clips, files, password_resets, revoked_tokens, oauth_login_codes FROM anon, authenticated"
         )
         try:
             await db.execute(
@@ -239,6 +247,16 @@ async def _run_migrations(db) -> None:
         except Exception:
             # Existing installations may already have the named constraint.
             pass
+
+    try:
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_subject)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_oauth_login_codes_hash ON oauth_login_codes(code_hash)"
+        )
+    except Exception:
+        pass
 
 
 async def _create_indexes(db) -> None:
@@ -251,6 +269,7 @@ async def _create_indexes(db) -> None:
         "CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_revoked_tokens_jti ON revoked_tokens(jti)",
         "CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_oauth_login_codes_hash ON oauth_login_codes(code_hash)",
     ]
     for statement in indexes:
         await db.execute(statement)
@@ -266,6 +285,8 @@ async def init_db() -> None:
                     email VARCHAR(255) UNIQUE NOT NULL,
                     username VARCHAR(255) UNIQUE NOT NULL,
                     hashed_password TEXT NOT NULL,
+                    oauth_provider VARCHAR(32),
+                    oauth_subject VARCHAR(255),
                     tier VARCHAR(50) DEFAULT 'free',
                     token_version INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -351,6 +372,17 @@ async def init_db() -> None:
                 );
             """)
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS oauth_login_codes (
+                    id VARCHAR(100) PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    code_hash VARCHAR(128) UNIQUE NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             await _run_migrations(db)
             await _create_indexes(db)
         return
@@ -367,6 +399,8 @@ async def init_db() -> None:
                 email TEXT UNIQUE NOT NULL,
                 username TEXT UNIQUE NOT NULL,
                 hashed_password TEXT NOT NULL,
+                oauth_provider TEXT,
+                oauth_subject TEXT,
                 tier TEXT DEFAULT 'free',
                 token_version INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -461,6 +495,18 @@ async def init_db() -> None:
                 user_id INTEGER,
                 expires_at TIMESTAMP NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_login_codes (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                code_hash TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
         """)
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import AsyncClient
 from backend.auth import get_password_hash, verify_password, resolve_jwt_secret
+from backend.database import adapt_timestamp, get_db
+from backend.routers.auth import _oauth_code_hash
 from backend.utils.rate_limit import clear_rate_limits
 
 
@@ -65,6 +68,29 @@ async def test_login_invalid_password(client: AsyncClient, auth_user):
     )
     assert response.status_code == 401
     assert "incorrect" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_google_provider_status_and_one_time_exchange(client: AsyncClient, auth_user):
+    """The browser never receives a reusable Google credential; it exchanges a
+    short-lived, hashed, single-use code for the app's own JWT."""
+    providers = await client.get("/api/auth/providers")
+    assert providers.status_code == 200
+    assert providers.json() == {"google": False}
+
+    raw_code = "g" * 43
+    async with await get_db() as db:
+        await db.execute(
+            "INSERT INTO oauth_login_codes (id, user_id, code_hash, expires_at, used) VALUES (?, ?, ?, ?, 0)",
+            ("oauth_test_code", auth_user["id"], _oauth_code_hash(raw_code), adapt_timestamp(datetime.now(timezone.utc) + timedelta(minutes=1))),
+        )
+        await db.commit()
+
+    exchanged = await client.post("/api/auth/google/exchange", json={"code": raw_code})
+    assert exchanged.status_code == 200
+    assert exchanged.json()["user"]["id"] == auth_user["id"]
+    replay = await client.post("/api/auth/google/exchange", json={"code": raw_code})
+    assert replay.status_code == 400
 
 
 def test_password_hashing_strictly_bcrypt_no_sha256():
@@ -185,4 +211,3 @@ async def test_forgot_and_reset_password_flow(client: AsyncClient, auth_user, ca
     )
     assert reuse_res.status_code == 400
     assert "invalid or expired" in reuse_res.json()["detail"].lower()
-

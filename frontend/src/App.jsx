@@ -20,6 +20,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(readTabFromHash);
   const [user, setUser] = useState(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authError, setAuthError] = useState('');
 
   useEffect(() => {
     const stored = api.auth.getCurrentUser();
@@ -32,6 +33,18 @@ export default function App() {
     // auth modal so AuthPage can pick up the token and prefill the form.
     if (new URLSearchParams(window.location.search).get('reset_token')) {
       setShowAuthModal(true);
+    }
+
+    const oauthCode = new URLSearchParams(window.location.search).get('oauth_code');
+    if (oauthCode) {
+      const cleanUrl = `${window.location.pathname}${window.location.hash || '#/'}`;
+      window.history.replaceState({}, '', cleanUrl);
+      api.auth.exchangeGoogleCode(oauthCode)
+        .then((result) => setUser(result.user))
+        .catch((err) => {
+          setAuthError(err.message || 'Google sign-in could not be completed.');
+          setShowAuthModal(true);
+        });
     }
 
     const onHashChange = () => setActiveTab(readTabFromHash());
@@ -55,6 +68,7 @@ export default function App() {
 
   const handleAuthSuccess = (userData) => {
     setUser(userData);
+    setAuthError('');
     setShowAuthModal(false);
   };
 
@@ -114,6 +128,7 @@ export default function App() {
         <AuthPage
           onAuthSuccess={handleAuthSuccess}
           onClose={() => setShowAuthModal(false)}
+          initialError={authError}
         />
       )}
 

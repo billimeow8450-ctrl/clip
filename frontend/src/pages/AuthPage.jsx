@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { User, Mail, Lock, Scissors, AlertCircle, ArrowRight, X, KeyRound, CheckCircle2, MailCheck } from 'lucide-react';
 import { api } from '../api';
 
-export default function AuthPage({ onAuthSuccess, onClose }) {
+export default function AuthPage({ onAuthSuccess, onClose, initialError = '' }) {
   // 'login' | 'register' | 'forgot'
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -39,6 +39,7 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [googleAvailable, setGoogleAvailable] = useState(false);
 
   const dialogRef = useRef(null);
 
@@ -51,6 +52,14 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
     dialogRef.current?.focus();
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    setError(initialError);
+  }, [initialError]);
+
+  useEffect(() => {
+    api.auth.getProviders().then((providers) => setGoogleAvailable(Boolean(providers.google))).catch(() => setGoogleAvailable(false));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -103,20 +112,20 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-md animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-3 sm:p-6 bg-slate-900/50 backdrop-blur-md animate-fadeIn">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={authMode === 'login' ? 'Sign in' : authMode === 'register' ? 'Create account' : 'Reset password'}
         tabIndex={-1}
-        className="relative max-w-md w-full p-8 rounded-2xl bg-white border border-line shadow-dropdown outline-none"
+        className="relative my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain p-5 sm:p-8 rounded-2xl bg-white border border-line shadow-dropdown outline-none"
       >
         {onClose && (
           <button
             onClick={onClose}
             aria-label="Close"
-            className="absolute top-5 right-5 w-8 h-8 rounded-full bg-subtle flex items-center justify-center text-ink-muted hover:text-ink transition-colors"
+            className="absolute top-3 right-3 sm:top-5 sm:right-5 min-w-11 min-h-11 rounded-full bg-subtle flex items-center justify-center text-ink-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -199,7 +208,7 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder={authMode === 'login' ? 'user@domain.com or username' : 'name@domain.com'}
-                    className="input-field pl-10"
+                    className="input-field has-leading-icon"
                     autoComplete="username"
                   />
                 </div>
@@ -219,7 +228,7 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="creator101"
-                      className="input-field pl-10"
+                      className="input-field has-leading-icon"
                       autoComplete="username"
                     />
                   </div>
@@ -250,7 +259,7 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={authMode === 'register' ? 'min 8 characters' : '••••••••'}
-                    className="input-field pl-10"
+                    className="input-field has-leading-icon"
                     autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                   />
                 </div>
@@ -273,7 +282,7 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@domain.com"
-                  className="input-field pl-10"
+                  className="input-field has-leading-icon"
                   autoComplete="email"
                 />
               </div>
@@ -293,7 +302,7 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
                     value={resetToken}
                     onChange={(e) => setResetToken(e.target.value)}
                     placeholder="Paste the token from your email"
-                    className="input-field pl-10 font-mono text-xs"
+                    className="input-field has-leading-icon font-mono text-xs"
                   />
                 </div>
               </div>
@@ -310,12 +319,29 @@ export default function AuthPage({ onAuthSuccess, onClose }) {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="•••••••• (min 8 chars)"
-                    className="input-field pl-10"
+                    className="input-field has-leading-icon"
                     autoComplete="new-password"
                   />
                 </div>
                 <p className="text-[10px] text-ink-dim mt-1">At least 8 characters with a letter and a number.</p>
               </div>
+            </>
+          )}
+
+          {authMode !== 'forgot' && (
+            <>
+              <div className="relative my-5 flex items-center" aria-hidden="true"><div className="grow border-t border-line" /><span className="mx-3 text-[11px] font-medium text-ink-dim">or</span><div className="grow border-t border-line" /></div>
+              <button
+                type="button"
+                onClick={() => { window.location.assign(api.auth.googleStartUrl()); }}
+                disabled={!googleAvailable}
+                title={googleAvailable ? 'Continue with Google' : 'Google sign-in is being configured'}
+                className="btn-secondary w-full min-h-11 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" focusable="false"><path fill="#4285F4" d="M21.35 12.2c0-.65-.06-1.27-.17-1.87H12v3.54h5.24a4.48 4.48 0 0 1-1.94 2.94v2.3h3.14c1.84-1.7 2.91-4.2 2.91-6.91Z"/><path fill="#34A853" d="M12 21.75c2.64 0 4.85-.88 6.47-2.39l-3.14-2.3c-.88.59-2  .94-3.33.94-2.56 0-4.73-1.73-5.5-4.05H3.27v2.37A9.76 9.76 0 0 0 12 21.75Z"/><path fill="#FBBC05" d="M6.5 13.95A5.86 5.86 0 0 1 6.2 12c0-.68.12-1.34.3-1.95V7.68H3.27A9.75 9.75 0 0 0 2.25 12c0 1.57.38 3.06 1.02 4.32l3.23-2.37Z"/><path fill="#EA4335" d="M12 6c1.44 0 2.73.5 3.75 1.48l2.81-2.8C16.84 3.08 14.64 2.25 12 2.25a9.76 9.76 0 0 0-8.73 5.43l3.23 2.37C7.27 7.73 9.44 6 12 6Z"/></svg>
+                Continue with Google
+              </button>
+              {!googleAvailable && <p className="mt-2 text-center text-[11px] text-ink-dim">Google sign-in is being configured. Email sign-in is available now.</p>}
             </>
           )}
 

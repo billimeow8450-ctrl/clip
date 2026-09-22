@@ -96,6 +96,20 @@ export const api = {
     async resetPassword(data) {
       return request('/api/auth/reset-password', { method: 'POST', body: data });
     },
+    async getProviders() {
+      return request('/api/auth/providers');
+    },
+    googleStartUrl() {
+      return resolveApiUrl('/api/auth/google/start');
+    },
+    async exchangeGoogleCode(code) {
+      const res = await request('/api/auth/google/exchange', { method: 'POST', body: { code } });
+      if (res.token) {
+        sessionStorage.setItem('clip_auth_token', res.token);
+        sessionStorage.setItem('clip_user', JSON.stringify(res.user));
+      }
+      return res;
+    },
     getCurrentUser() {
       const user = sessionStorage.getItem('clip_user');
       return user ? JSON.parse(user) : null;

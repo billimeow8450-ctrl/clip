@@ -15,10 +15,23 @@ CREATE TABLE IF NOT EXISTS users (
     email           VARCHAR(255) UNIQUE NOT NULL,
     username        VARCHAR(255) UNIQUE NOT NULL,
     hashed_password TEXT NOT NULL,
+    oauth_provider  VARCHAR(32),
+    oauth_subject   VARCHAR(255),
     tier            VARCHAR(50) DEFAULT 'free',
     token_version   INTEGER NOT NULL DEFAULT 0, -- bumped on password reset; invalidates all JWTs
     created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_subject);
+
+CREATE TABLE IF NOT EXISTS oauth_login_codes (
+    id         VARCHAR(100) PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  VARCHAR(128) UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used       INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_login_codes_hash ON oauth_login_codes(code_hash);
 
 -- ------------------------------------------------------------- projects -----
 CREATE TABLE IF NOT EXISTS projects (
