@@ -25,17 +25,17 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpen
           type="button"
           onClick={() => setActiveTab('landing')}
           className="flex items-center gap-2.5 cursor-pointer select-none group shrink-0"
-          aria-label="Manthan Ventures home"
+          aria-label="Clip Studio home"
         >
           <div className="w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
             <Scissors className="w-4 h-4 text-blue-400" />
           </div>
           <div className="flex items-center gap-2">
             <span className="font-display font-black text-xl tracking-tight text-slate-950 flex items-center">
-              Manthan <span className="text-[#0066ff]">Ventures</span>
+              Clip <span className="text-[#0066ff]">Studio</span>
             </span>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-bold">
-              STUDIO
+              AI
             </span>
           </div>
         </button>

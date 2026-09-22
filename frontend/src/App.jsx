@@ -127,10 +127,10 @@ export default function App() {
                   <Scissors className="w-4 h-4" />
                 </div>
                 <span className="font-display font-bold text-lg text-ink">
-                  Manthan <span className="text-teal-600">Ventures</span>
+                  Clip <span className="text-teal-600">Studio</span>
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 uppercase font-semibold">
-                  STUDIO
+                  AI
                 </span>
               </div>
               <p className="text-sm text-ink-muted max-w-sm leading-relaxed">
@@ -146,7 +146,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-8 text-ink-dim">
-            <p>© {new Date().getFullYear()} Manthan Ventures. Video intelligence for ambitious teams.</p>
+            <p>© {new Date().getFullYear()} Clip Studio. Video intelligence for ambitious teams.</p>
           </div>
         </div>
       </footer>

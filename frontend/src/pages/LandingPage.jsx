@@ -882,7 +882,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
               Computational Intelligence Behind Every Frame
             </h2>
             <p className="text-base sm:text-lg text-ink-muted">
-              Manthan Ventures gives creators one secure workspace for source intake, clip selection, timelines, and transcript exports.
+              Clip Studio gives creators one secure workspace for source intake, clip selection, timelines, and transcript exports.
             </p>
           </div>
 
@@ -1169,7 +1169,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
               Frequently Asked Questions
             </h2>
             <p className="text-sm text-ink-dim">
-              Everything you need to know about Manthan Ventures Studio
+              Everything you need to know about Clip Studio
             </p>
           </div>
 
@@ -1181,7 +1181,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
               },
               {
                 q: 'How does active speaker detection work in 9:16 vertical crop?',
-                a: 'When the production pipeline is enabled, computer vision tracks facial landmarks and lips in real time. If one person speaks, they remain centered. If two podcast hosts debate, Manthan Ventures generates a clean split-screen layout.'
+                a: 'When the production pipeline is enabled, computer vision tracks facial landmarks and lips in real time. If one person speaks, they remain centered. If two podcast hosts debate, Clip Studio generates a clean split-screen layout.'
               },
               {
                 q: 'What video formats and platforms are supported?',

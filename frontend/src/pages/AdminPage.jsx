@@ -42,7 +42,7 @@ export default function AdminPage({ user }) {
     <section className="max-w-6xl mx-auto pb-20 space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] font-bold text-blue-600">Manthan Ventures</p>
+          <p className="text-xs uppercase tracking-[0.2em] font-bold text-blue-600">Clip Studio</p>
           <h1 className="text-3xl font-black mt-2">Operations console</h1>
           <p className="text-sm text-ink-muted mt-2">Live service activity and account support, protected by your server-side admin allowlist.</p>
         </div>
