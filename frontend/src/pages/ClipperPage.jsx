@@ -112,7 +112,7 @@ export default function ClipperPage({ user, onRequireAuth }) {
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setFile(null); }}
                 placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
-                className="input-field pl-10"
+                className="input-field has-leading-icon"
               />
             </div>
           </div>
@@ -187,8 +187,8 @@ export default function ClipperPage({ user, onRequireAuth }) {
               <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
                 Target Clip Duration
               </div>
-              <div className="grid grid-cols-5 gap-1.5" role="group" aria-label="Target clip duration">
-                {['30', '60', '90', '120', 'all'].map((dur) => (
+              <div className="grid grid-cols-4 gap-1.5" role="group" aria-label="Target clip duration">
+                {['30', '60', '90', '120'].map((dur) => (
                   <button
                     key={dur}
                     type="button"
@@ -200,7 +200,7 @@ export default function ClipperPage({ user, onRequireAuth }) {
                         : 'bg-white text-[#526173] border-[#d4dee4] hover:bg-[#eaf0f2]'
                     }`}
                   >
-                    {dur === 'all' ? 'All' : `${dur}s`}
+                    {`${dur}s`}
                   </button>
                 ))}
               </div>

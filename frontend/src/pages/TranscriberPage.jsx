@@ -128,7 +128,7 @@ export default function TranscriberPage({ user, onRequireAuth }) {
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setFile(null); }}
                 placeholder="https://www.youtube.com/watch?v=..."
-                className="input-field pl-10"
+                className="input-field has-leading-icon"
               />
             </div>
           </div>

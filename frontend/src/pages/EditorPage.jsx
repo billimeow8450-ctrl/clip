@@ -168,7 +168,7 @@ export default function EditorPage({ user, onRequireAuth }) {
                   onChange={(e) => setYoutubeUrl(e.target.value)}
                   onBlur={() => handleFetchMetadata(youtubeUrl)}
                   placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
-                  className="input-field pl-10"
+                  className="input-field has-leading-icon"
                 />
               </div>
               <button
