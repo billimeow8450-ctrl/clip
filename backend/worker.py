@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -164,6 +165,47 @@ async def _persist_output(path: Path, filename: str) -> None:
     if using_object_storage():
         await upload_stored_file(f"outputs/{filename}", path)
         path.unlink(missing_ok=True)
+
+
+def _source_duration_seconds(source: Path) -> float:
+    """Read a media duration with ffprobe without invoking a shell."""
+    completed = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(source),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    duration = float(completed.stdout.strip())
+    if duration <= 0:
+        raise RuntimeError("The uploaded video has no usable duration")
+    return duration
+
+
+def _render_vertical_clip(source: Path, destination: Path, start: float, duration: float) -> None:
+    """Render a genuine centre-cropped 9:16 H.264/AAC clip using ffmpeg."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}",
+            "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
+            "-movflags", "+faststart", str(destination),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=max(120, int(duration * 12)),
+    )
+    if completed.returncode != 0 or not destination.is_file() or destination.stat().st_size < 4096:
+        destination.unlink(missing_ok=True)
+        detail = completed.stderr.strip()[-500:] or "ffmpeg did not produce an output file"
+        raise RuntimeError(f"Clip rendering failed: {detail}")
 
 
 def _cleanup_workfile(path: Optional[Path]) -> None:
@@ -333,6 +375,7 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
         target_len = _parse_target_len(target_duration)
 
         clips: list = []
+        input_file: Optional[Path] = None
 
         if ENABLE_HEAVY_RENDERING:
             await update_job_status(job_id, "processing", 30.0, "Executing viral research engine & comment scoring...")
@@ -357,44 +400,67 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
                         clips.append({
                             "id": clip_id,
                             "title": f"Viral Moment #{idx + 1} ({int(score)}% engagement)",
-                            "start_time": round(st, 1),
-                            "end_time": round(en, 1),
-                            "duration": round(en - st, 1),
+                            "start_time": st,
                             "viral_score": round(score, 1),
-                            "hook_text": f"High retention spike at {int(ts)}s from viral comments analysis",
-                            "video_url": None,  # rendered outputs are attached below if produced
+                            "hook_text": f"High engagement signal near {int(ts)}s from public comments analysis",
                             "thumbnail_url": params.get("thumbnail_url") or FALLBACK_THUMBNAIL,
                             "is_sample": False,
                         })
             except Exception as research_err:
-                logger.warning(f"Viral research engine warning: {research_err}; generating structured clips.")
+                logger.warning("Viral research engine warning: %s", research_err)
 
-        # If clips are still empty (simulation mode, or no comment scores), produce
-        # clearly-labeled placeholder segments instead of fabricated "viral" data.
-        if not clips:
-            await asyncio.sleep(1.0)
-            await update_job_status(job_id, "processing", 30.0, "Scraping audience retention & finding viral hooks...")
-            await asyncio.sleep(1.0)
-            await update_job_status(job_id, "processing", 60.0, "Ranking segments by viral potential & hooks...")
-            await asyncio.sleep(1.0)
-            await update_job_status(job_id, "processing", 85.0, "Reframing active speakers to vertical 9:16...")
-            await asyncio.sleep(0.8)
+            await update_job_status(job_id, "processing", 55.0, "Downloading and preparing source video...")
+            input_file = await _resolve_input_file(url, job_id)
+            if not input_file or not input_file.exists():
+                raise RuntimeError("The source video could not be retrieved for clip rendering")
+            source_duration = await asyncio.to_thread(_source_duration_seconds, input_file)
 
-            offsets = (42.0, 185.0, 360.0)
-            scores = (97.4, 93.1, 89.5)
-            for idx, (offset, score) in enumerate(zip(offsets, scores)):
-                clips.append({
-                    "id": f"clip_{uuid.uuid4().hex[:8]}",
-                    "title": f"Demo Segment #{idx + 1}",
-                    "start_time": offset,
-                    "end_time": round(offset + target_len, 1),
-                    "duration": target_len,
-                    "viral_score": score,
-                    "hook_text": "SIMULATION DATA — enable ENABLE_HEAVY_RENDERING for real analysis",
-                    "video_url": None,
-                    "thumbnail_url": None,
-                    "is_sample": True,
+            # Public comment data is not reliably available for every video. In that
+            # case create real, evenly distributed excerpts and say so plainly rather
+            # than fabricating retention scores or placeholder URLs.
+            if not clips:
+                max_start = max(0.0, source_duration - min(target_len, source_duration))
+                starts = [0.0] if max_start == 0 else [round(max_start * ratio, 1) for ratio in (0.0, 0.5, 1.0)]
+                clips = [
+                    {
+                        "id": f"clip_{uuid.uuid4().hex[:8]}",
+                        "title": f"Video Segment #{index + 1}",
+                        "start_time": start,
+                        "viral_score": None,
+                        "hook_text": "Real source excerpt; audience metrics were unavailable for this video.",
+                        "thumbnail_url": params.get("thumbnail_url") or FALLBACK_THUMBNAIL,
+                        "is_sample": False,
+                    }
+                    for index, start in enumerate(dict.fromkeys(starts))
+                ]
+
+            await update_job_status(job_id, "processing", 75.0, "Rendering vertical 9:16 clips...")
+            rendered_clips = []
+            for index, clip in enumerate(clips, start=1):
+                start = min(max(0.0, float(clip["start_time"])), max(0.0, source_duration - 0.1))
+                duration = min(target_len, source_duration - start)
+                if duration < 0.5:
+                    continue
+                filename = f"clip_{job_id}_{index}.mp4"
+                output_file = OUTPUT_DIR / filename
+                await asyncio.to_thread(_render_vertical_clip, input_file, output_file, start, duration)
+                await _persist_output(output_file, filename)
+                clip.update({
+                    "start_time": round(start, 1),
+                    "end_time": round(start + duration, 1),
+                    "duration": round(duration, 1),
+                    "video_url": sign_file_url(filename, user_id),
                 })
+                rendered_clips.append(clip)
+            clips = rendered_clips
+            if not clips:
+                raise RuntimeError("No playable source segments could be rendered")
+            _cleanup_workfile(input_file)
+        else:
+            # Preview mode is deliberately explicit; it must never pretend to have
+            # created media or completed an analysis of a user's source.
+            await asyncio.sleep(0.3)
+            clips = []
 
         # Save clips in DB
         async with await get_db() as db:
@@ -429,6 +495,7 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
         await update_job_status(job_id, "completed", 100.0, "Completed", result_data=result)
 
     except Exception as exc:
+        _cleanup_workfile(input_file if 'input_file' in locals() else None)
         logger.exception("Clipper job failed")
         await update_job_status(job_id, "failed", 100.0, "Failed", error_message="Processing failed. Please retry or contact support with the job ID.")
 
