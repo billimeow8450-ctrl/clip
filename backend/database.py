@@ -90,7 +90,7 @@ class _PGConnectionWrapper:
             records = await self._conn.fetch(pg_query, *params)
             last_id = records[0]["id"] if records and "id" in records[0] else None
             return _PGCursor(records, lastrowid=last_id)
-        elif pg_query.strip().upper().startswith("SELECT"):
+        elif pg_query.strip().upper().startswith("SELECT") or " RETURNING " in pg_query.upper():
             records = await self._conn.fetch(pg_query, *params)
             return _PGCursor(records)
         else:
@@ -225,6 +225,20 @@ async def _run_migrations(db) -> None:
         await db.execute(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0"
         )
+        # The API connects directly to Postgres; the browser must never gain
+        # access through Supabase's generated REST roles.
+        for table in ("users", "projects", "jobs", "clips", "files", "password_resets", "revoked_tokens"):
+            await db.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        await db.execute(
+            "REVOKE ALL ON TABLE users, projects, jobs, clips, files, password_resets, revoked_tokens FROM anon, authenticated"
+        )
+        try:
+            await db.execute(
+                "ALTER TABLE jobs ADD CONSTRAINT jobs_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE NOT VALID"
+            )
+        except Exception:
+            # Existing installations may already have the named constraint.
+            pass
 
 
 async def _create_indexes(db) -> None:
@@ -275,7 +289,7 @@ async def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS jobs (
                     id VARCHAR(100) PRIMARY KEY,
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    project_id VARCHAR(100),
+                    project_id VARCHAR(100) REFERENCES projects(id) ON DELETE CASCADE,
                     type VARCHAR(50) NOT NULL,
                     status VARCHAR(50) NOT NULL DEFAULT 'queued',
                     progress REAL NOT NULL DEFAULT 0.0,
@@ -379,7 +393,7 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
-                project_id TEXT,
+                project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
                 type TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'queued',
                 progress REAL NOT NULL DEFAULT 0.0,

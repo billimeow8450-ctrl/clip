@@ -4,9 +4,9 @@ import asyncio
 import json
 import math
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..database import get_db
 from ..auth import get_current_user
@@ -17,14 +17,14 @@ router = APIRouter(prefix="/api/editor", tags=["Editor"])
 
 
 class EditorProcessRequest(BaseModel):
-    source_type: str  # 'youtube' or 'file'
-    source_url: str
-    title: Optional[str] = "Untitled Clip Project"
-    thumbnail_url: Optional[str] = None
+    source_type: str = Field(min_length=1, max_length=20)
+    source_url: str = Field(min_length=1, max_length=2048)
+    title: Optional[str] = Field(default="Untitled Clip Project", max_length=140)
+    thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
     start_seconds: float
     end_seconds: float
-    caption_style: Optional[str] = "hormozi"
-    layout_mode: Optional[str] = "focus"
+    caption_style: Literal["hormozi", "minimal", "bold"] = "hormozi"
+    layout_mode: Literal["focus", "split", "auto"] = "focus"
 
 
 class EditorProcessResponse(BaseModel):

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .database import init_db
+from .utils.storage import require_production_storage
 from .routers import admin, auth, youtube, editor, clipper, transcript, jobs, files
 
 logging.basicConfig(
@@ -20,6 +21,7 @@ logger = logging.getLogger("clip_studio.api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing Clip Studio database...")
+    require_production_storage()
     await init_db()
     logger.info("Recovering jobs interrupted by restart...")
     from .worker import recover_stuck_jobs, cleanup_finished_jobs
@@ -81,6 +83,7 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
     if _os.getenv("ENVIRONMENT", "development").lower().strip() == "production":
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"

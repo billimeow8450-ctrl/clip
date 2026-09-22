@@ -6,12 +6,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
 from ..database import get_db
 from ..auth import get_current_user, get_optional_user
 from ..utils.rate_limit import check_rate_limit, get_client_ip
 from ..utils.security import sign_file_url, verify_file_signature
+from ..utils.storage import create_download_url, delete_file as delete_stored_file, upload_file as upload_stored_file, using_object_storage
 
 router = APIRouter(prefix="/api", tags=["Files"])
 
@@ -20,7 +21,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent / "storage" / "outputs"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_FILE_SIZE_MB", "500")) * 1024 * 1024
+MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_FILE_SIZE_MB", "100")) * 1024 * 1024
 MAX_TOTAL_PER_USER_BYTES = int(os.getenv("MAX_TOTAL_STORAGE_PER_USER_MB", "2048")) * 1024 * 1024
 MAX_FILES_PER_USER = int(os.getenv("MAX_FILES_PER_USER", "50"))
 CHUNK_SIZE = 1024 * 1024  # 1 MB chunk
@@ -105,7 +106,10 @@ async def upload_file(
         )
 
     file_id = f"up_{uuid.uuid4().hex[:12]}{ext}"
-    dest_path = (UPLOAD_DIR / file_id).resolve()
+    # The local path is only a short-lived staging file. Production persists it
+    # to object storage before creating the database record.
+    dest_path = (UPLOAD_DIR / f".{file_id}.uploading").resolve()
+    storage_key = f"uploads/{file_id}"
 
     total_bytes = 0
     head = b""
@@ -139,7 +143,18 @@ async def upload_file(
             detail="File content does not match the declared media format.",
         )
 
-    # Store file ownership in database
+    try:
+        if using_object_storage():
+            await upload_stored_file(storage_key, dest_path, file.content_type or "application/octet-stream")
+        else:
+            final_path = (UPLOAD_DIR / file_id).resolve()
+            dest_path.replace(final_path)
+            dest_path = final_path
+    except Exception:
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=503, detail="Media storage is temporarily unavailable. Please try again.")
+
+    # Store file ownership only after durable storage succeeds.
     try:
         async with await get_db() as db:
             await db.execute(
@@ -147,12 +162,18 @@ async def upload_file(
                 INSERT INTO files (id, user_id, original_name, file_path, size_bytes)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (file_id, current_user["id"], file.filename, str(dest_path), total_bytes),
+                (file_id, current_user["id"], file.filename, storage_key if using_object_storage() else str(dest_path), total_bytes),
             )
             await db.commit()
     except Exception:
+        if using_object_storage():
+            await delete_stored_file(storage_key)
         dest_path.unlink(missing_ok=True)
         raise
+    finally:
+        # Never retain production uploads on the web-service filesystem.
+        if using_object_storage():
+            dest_path.unlink(missing_ok=True)
 
     return {
         "file_id": file_id,
@@ -219,6 +240,15 @@ async def get_file(
         # 404 rather than 403 to avoid confirming a file exists for the caller.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+    if using_object_storage():
+        # The storage key is not user-controlled: file ownership/signature was
+        # verified above and upload objects use this fixed key convention.
+        try:
+            namespace = "uploads" if clean_name.startswith("up_") else "outputs"
+            return RedirectResponse(await create_download_url(f"{namespace}/{clean_name}"), status_code=307)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
     media_path = _resolve_media_path(clean_name)
     if media_path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -261,8 +291,14 @@ async def delete_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     async with await get_db() as db:
+        cursor = await db.execute("SELECT file_path FROM files WHERE id = ? AND user_id = ?", (clean_name, current_user["id"]))
+        row = await cursor.fetchone()
         await db.execute("DELETE FROM files WHERE id = ? AND user_id = ?", (clean_name, current_user["id"]))
         await db.commit()
+
+    if using_object_storage():
+        await delete_stored_file(str(row["file_path"]))
+        return {"deleted": clean_name}
 
     upload_path = (UPLOAD_DIR / clean_name).resolve()
     if upload_path.is_relative_to(UPLOAD_DIR.resolve()):

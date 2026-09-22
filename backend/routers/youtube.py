@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 import asyncio
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 import logging
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("clip_studio.youtube")
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/youtube", tags=["YouTube"])
 
 
 class MetadataRequest(BaseModel):
-    url: str
+    url: str = Field(min_length=1, max_length=2048)
 
 
 class MetadataResponse(BaseModel):
@@ -70,10 +70,18 @@ def fetch_yt_metadata_sync(url: str) -> dict:
 
 
 from ..utils.security import validate_source_url
+from ..auth import get_current_user
+from ..utils.rate_limit import check_rate_limit, get_client_ip
 
 
 @router.post("/metadata", response_model=MetadataResponse)
-async def get_metadata(req: MetadataRequest) -> MetadataResponse:
+async def get_metadata(req: MetadataRequest, request: Request, _user=Depends(get_current_user)) -> MetadataResponse:
+    await check_rate_limit(
+        key=f"youtube_metadata:{get_client_ip(request)}",
+        max_requests=20,
+        window_seconds=3600,
+        error_message="Too many metadata requests. Please try again later.",
+    )
     # SSRF check
     req.url = validate_source_url(req.url)
     video_id = extract_video_id(req.url)

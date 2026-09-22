@@ -7,6 +7,7 @@ import os
 import sys
 import time
 import uuid
+import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -17,6 +18,7 @@ if str(SOURCE_DIR) not in sys.path:
 
 from .database import get_db
 from .utils.security import get_local_upload_id, sign_file_url
+from .utils.storage import download_file as download_stored_file, upload_file as upload_stored_file, using_object_storage
 
 logger = logging.getLogger("clip_studio.worker")
 
@@ -83,15 +85,99 @@ async def update_job_status(
         await db.commit()
 
 
-def _resolve_input_file(source_url: Optional[str]) -> Optional[Path]:
-    """Map a source URL/path to an existing upload on disk."""
+async def claim_job(job_id: str) -> bool:
+    """Atomically claim a queued job across all web processes.
+
+    The database is the source of truth; duplicate startup recovery calls and
+    concurrent HTTP workers cannot both transition the same row to processing.
+    """
+    async with await get_db() as db:
+        cursor = await db.execute(
+            """
+            UPDATE jobs
+            SET status = 'processing', progress = 1.0, stage = 'Preparing worker', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = 'queued'
+            RETURNING id
+            """,
+            (job_id,),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+        return row is not None
+
+
+async def _resolve_input_file(source_url: Optional[str], job_id: str) -> Optional[Path]:
+    """Materialize an owned upload into an isolated short-lived work path."""
     upload_id = get_local_upload_id(source_url or "")
     if not upload_id:
-        return None
+        if not source_url:
+            return None
+        # External URLs have already passed the platform allowlist and DNS
+        # checks in the API layer. yt-dlp is called through its Python API, not
+        # a shell, and downloads into an isolated per-job workspace.
+        try:
+            import yt_dlp
+        except ImportError as exc:
+            raise RuntimeError("External source ingestion is unavailable") from exc
+        work_dir = UPLOAD_DIR / ".work" / job_id
+        work_dir.mkdir(parents=True, exist_ok=True)
+        template = str(work_dir / "source.%(ext)s")
+
+        def _download() -> Path:
+            options = {
+                "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+                "outtmpl": template,
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "max_filesize": int(os.getenv("MAX_EXTERNAL_SOURCE_MB", "1024")) * 1024 * 1024,
+            }
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(source_url, download=True)
+                filename = Path(ydl.prepare_filename(info))
+                if filename.exists():
+                    return filename
+                candidates = [p for p in work_dir.iterdir() if p.is_file()]
+                if not candidates:
+                    raise RuntimeError("No media file was downloaded")
+                return max(candidates, key=lambda p: p.stat().st_size)
+
+        return await asyncio.to_thread(_download)
+    if using_object_storage():
+        work_dir = UPLOAD_DIR / ".work"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        candidate = work_dir / f"{job_id}_{upload_id}"
+        try:
+            await download_stored_file(f"uploads/{upload_id}", candidate)
+            return candidate
+        except Exception:
+            candidate.unlink(missing_ok=True)
+            raise RuntimeError("The uploaded source could not be retrieved from durable storage")
     candidate = (UPLOAD_DIR / upload_id).resolve()
     if candidate.parent == UPLOAD_DIR.resolve() and candidate.is_file():
         return candidate
     return None
+
+
+async def _persist_output(path: Path, filename: str) -> None:
+    """Move generated artifacts to durable storage before publishing job results."""
+    if using_object_storage():
+        await upload_stored_file(f"outputs/{filename}", path)
+        path.unlink(missing_ok=True)
+
+
+def _cleanup_workfile(path: Optional[Path]) -> None:
+    if not path:
+        return
+    work_root = (UPLOAD_DIR / ".work").resolve()
+    try:
+        if path.resolve().is_relative_to(work_root):
+            if path.is_file():
+                path.unlink(missing_ok=True)
+            if path.parent != work_root:
+                shutil.rmtree(path.parent, ignore_errors=True)
+    except (OSError, ValueError):
+        return
 
 
 def _parse_target_len(target_duration: Optional[str]) -> float:
@@ -106,17 +192,14 @@ def _parse_target_len(target_duration: Optional[str]) -> float:
 
 
 async def recover_stuck_jobs() -> int:
-    """Recover jobs left in queued/processing by a restart (finding M4).
-
-    In simulation mode the pipeline is short, so jobs are simply re-run.
-    With heavy rendering a job may exceed a process lifetime; those are marked
-    failed with a clear message instead of hanging forever.
-    """
+    """Requeue interrupted work; every execution still requires an atomic claim."""
     recovered = 0
     async with await get_db() as db:
         cursor = await db.execute(
-            "SELECT id, type, input_params, user_id FROM jobs WHERE status IN ('queued', 'processing')"
+            "UPDATE jobs SET status = 'queued', progress = 0.0, stage = 'Recovered after restart', updated_at = CURRENT_TIMESTAMP WHERE status = 'processing'"
         )
+        await db.commit()
+        cursor = await db.execute("SELECT id, type, input_params, user_id FROM jobs WHERE status = 'queued'")
         rows = await cursor.fetchall()
 
     for row in rows:
@@ -124,17 +207,6 @@ async def recover_stuck_jobs() -> int:
             params = json.loads(row["input_params"] or "{}")
         except Exception:
             params = {}
-
-        if ENABLE_HEAVY_RENDERING:
-            await update_job_status(
-                row["id"],
-                "failed",
-                100.0,
-                "Interrupted by server restart",
-                error_message="Server restarted during processing; please resubmit the job.",
-            )
-            recovered += 1
-            continue
 
         if row["type"] == "clipper":
             spawn_job(process_clipper_job(row["id"], params, row["user_id"]))
@@ -169,6 +241,8 @@ async def cleanup_finished_jobs(max_age_hours: float = 24.0) -> int:
 async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) -> None:
     """Process an AI Video Editor job (File or YouTube Range + MasterEngine reframing)."""
     try:
+        if not await claim_job(job_id):
+            return
         await update_job_status(job_id, "processing", 10.0, "Preparing video source...")
 
         source_type = params.get("source_type")  # 'youtube' or 'file'
@@ -186,7 +260,7 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                 from master_engine.engine import MasterEngine
                 from master_engine.config import Settings
 
-                input_file = _resolve_input_file(source_url)
+                input_file = await _resolve_input_file(source_url, job_id)
                 output_file = OUTPUT_DIR / f"edited_{job_id}.mp4"
 
                 if input_file and input_file.exists():
@@ -197,6 +271,8 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                     # integration called a nonexistent ``process`` method, so
                     # heavy rendering always fell back to a fake result.
                     await asyncio.to_thread(engine.run_job, input_file, output_file)
+                    await _persist_output(output_file, output_file.name)
+                    _cleanup_workfile(input_file)
                     result = {
                         "output_video": sign_file_url(f"edited_{job_id}.mp4", user_id),
                         "duration": duration,
@@ -214,15 +290,8 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                         "message": "Source video file was not found on the server; nothing was rendered.",
                     }
             except Exception as engine_err:
-                logger.warning(f"MasterEngine execution fallback: {engine_err}")
-                result = {
-                    "output_video": None,
-                    "duration": duration,
-                    "caption_style": caption_style,
-                    "layout": layout_mode,
-                    "is_simulation": True,
-                    "message": f"Rendering failed: {str(engine_err)[:100]}",
-                }
+                logger.exception("MasterEngine execution failed")
+                raise RuntimeError("The editor render failed") from engine_err
         else:
             # Laptop-Safe Simulation mode for UI/UX testing without cooking hardware
             await asyncio.sleep(1.0)
@@ -249,12 +318,14 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
 
     except Exception as exc:
         logger.exception("Editor job failed")
-        await update_job_status(job_id, "failed", 100.0, "Failed", error_message=str(exc))
+        await update_job_status(job_id, "failed", 100.0, "Failed", error_message="Processing failed. Please retry or contact support with the job ID.")
 
 
 async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int) -> None:
     """Process an AI Clipper job (find viral hooks, segment, and render vertical shorts)."""
     try:
+        if not await claim_job(job_id):
+            return
         await update_job_status(job_id, "processing", 10.0, "Ingesting video & research signals...")
 
         url = params.get("url")
@@ -359,12 +430,14 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
 
     except Exception as exc:
         logger.exception("Clipper job failed")
-        await update_job_status(job_id, "failed", 100.0, "Failed", error_message=str(exc))
+        await update_job_status(job_id, "failed", 100.0, "Failed", error_message="Processing failed. Please retry or contact support with the job ID.")
 
 
 async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: int) -> None:
     """Process an AI Whisper transcription job."""
     try:
+        if not await claim_job(job_id):
+            return
         await update_job_status(job_id, "processing", 15.0, "Extracting audio track...")
 
         language = params.get("language", "en")
@@ -377,18 +450,20 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
             try:
                 from master_engine.transcribe import transcribe
 
-                input_file = _resolve_input_file(url_or_file)
+                input_file = await _resolve_input_file(url_or_file, job_id)
 
                 if input_file and input_file.exists():
                     await update_job_status(job_id, "processing", 40.0, "Running Whisper transcription...")
                     res = await asyncio.to_thread(transcribe, input_file)
+                    _cleanup_workfile(input_file)
                     if isinstance(res, dict):
                         transcript_segments = res.get("segments")
                         full_text = res.get("full_text", "")
             except Exception as t_err:
-                logger.warning(f"Whisper transcription fallback: {t_err}")
+                logger.exception("Whisper transcription failed")
+                raise RuntimeError("The transcript render failed") from t_err
 
-        if not transcript_segments:
+        if not transcript_segments and not ENABLE_HEAVY_RENDERING:
             await asyncio.sleep(1.0)
             await update_job_status(job_id, "processing", 45.0, "Running faster-whisper acoustic model...")
             await asyncio.sleep(1.0)
@@ -406,6 +481,9 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
             ]
             full_text = " ".join([s["text"] for s in transcript_segments])
 
+        if transcript_segments is None:
+            transcript_segments = []
+
         # Write actual export files to storage/outputs (these DO exist and are
         # served through signed URLs, unlike the old fake sample paths).
         txt_path = OUTPUT_DIR / f"transcript_{job_id}.txt"
@@ -417,6 +495,8 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
                 f"{i}\n{s.get('start', '00:00:00')} --> {s.get('end', '00:00:05')}\n{s.get('text', '')}\n"
             )
         srt_path.write_text("\n".join(srt_content), encoding="utf-8")
+        await _persist_output(txt_path, txt_path.name)
+        await _persist_output(srt_path, srt_path.name)
 
         result = {
             "language": language,
@@ -434,4 +514,4 @@ async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: i
 
     except Exception as exc:
         logger.exception("Transcript job failed")
-        await update_job_status(job_id, "failed", 100.0, "Failed", error_message=str(exc))
+        await update_job_status(job_id, "failed", 100.0, "Failed", error_message="Processing failed. Please retry or contact support with the job ID.")

@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..database import get_db
 from ..auth import get_current_user
@@ -16,11 +16,11 @@ router = APIRouter(prefix="/api/clipper", tags=["Clipper"])
 
 
 class ClipperProcessRequest(BaseModel):
-    url: str
-    title: Optional[str] = "Auto Clipper Project"
-    thumbnail_url: Optional[str] = None
-    analysis_mode: Optional[str] = "quick"  # 'quick' or 'deep'
-    target_duration: Optional[str] = "60"  # '30', '60', '90', '120', 'all'
+    url: str = Field(min_length=1, max_length=2048)
+    title: Optional[str] = Field(default="Auto Clipper Project", max_length=140)
+    thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
+    analysis_mode: Literal["quick", "deep"] = "quick"
+    target_duration: Literal["30", "60", "90", "120"] = "60"
 
 
 class ClipperProcessResponse(BaseModel):

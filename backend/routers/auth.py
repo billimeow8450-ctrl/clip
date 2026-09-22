@@ -16,6 +16,7 @@ from ..auth import (
     is_admin_user,
     revoke_jti,
     reset_token_fingerprint,
+    DUMMY_PASSWORD_HASH,
 )
 from ..utils.emailer import send_reset_email
 from ..utils.rate_limit import check_rate_limit, get_client_ip
@@ -91,6 +92,8 @@ def _check_password_strength(password: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must contain at least one letter and one number.",
         )
+    if len(password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at most 72 bytes.")
 
 
 @router.post("/register", response_model=AuthResponse)
@@ -158,7 +161,7 @@ async def login(req: LoginRequest, request: Request) -> AuthResponse:
 
     # Perform the same bcrypt work for an unknown account to avoid making
     # account existence measurable from login response time.
-    password_hash = user["hashed_password"] if user else get_password_hash("not-a-real-password")
+    password_hash = user["hashed_password"] if user else DUMMY_PASSWORD_HASH
     if not user or not verify_password(req.password, password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

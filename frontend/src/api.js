@@ -19,7 +19,7 @@ export function resolveApiUrl(path) {
 }
 
 function getAuthHeaders() {
-  const token = localStorage.getItem('clip_auth_token');
+  const token = sessionStorage.getItem('clip_auth_token');
   const headers = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -45,8 +45,8 @@ async function request(endpoint, options = {}) {
 
   if (!response.ok) {
     if (response.status === 401) {
-      localStorage.removeItem('clip_auth_token');
-      localStorage.removeItem('clip_user');
+      sessionStorage.removeItem('clip_auth_token');
+      sessionStorage.removeItem('clip_user');
     }
     const errorData = await response.json().catch(() => ({ detail: 'An error occurred' }));
     throw new Error(errorData.detail || `Request failed with status ${response.status}`);
@@ -60,16 +60,16 @@ export const api = {
     async register(data) {
       const res = await request('/api/auth/register', { method: 'POST', body: data });
       if (res.token) {
-        localStorage.setItem('clip_auth_token', res.token);
-        localStorage.setItem('clip_user', JSON.stringify(res.user));
+        sessionStorage.setItem('clip_auth_token', res.token);
+        sessionStorage.setItem('clip_user', JSON.stringify(res.user));
       }
       return res;
     },
     async login(data) {
       const res = await request('/api/auth/login', { method: 'POST', body: data });
       if (res.token) {
-        localStorage.setItem('clip_auth_token', res.token);
-        localStorage.setItem('clip_user', JSON.stringify(res.user));
+        sessionStorage.setItem('clip_auth_token', res.token);
+        sessionStorage.setItem('clip_user', JSON.stringify(res.user));
       }
       return res;
     },
@@ -87,8 +87,8 @@ export const api = {
       } catch {
         // Token may already be expired/invalid; local cleanup still applies.
       }
-      localStorage.removeItem('clip_auth_token');
-      localStorage.removeItem('clip_user');
+      sessionStorage.removeItem('clip_auth_token');
+      sessionStorage.removeItem('clip_user');
     },
     async forgotPassword(email) {
       return request('/api/auth/forgot-password', { method: 'POST', body: { email } });
@@ -97,7 +97,7 @@ export const api = {
       return request('/api/auth/reset-password', { method: 'POST', body: data });
     },
     getCurrentUser() {
-      const user = localStorage.getItem('clip_user');
+      const user = sessionStorage.getItem('clip_user');
       return user ? JSON.parse(user) : null;
     }
   },

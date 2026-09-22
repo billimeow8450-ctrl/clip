@@ -2,9 +2,8 @@ services:
   # 1. FastAPI Backend Web Service
   - type: web
     name: clip-studio-backend
-    runtime: python
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 2
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
       - key: ENVIRONMENT
@@ -20,17 +19,21 @@ services:
       - key: APP_BASE_URL
         value: https://clip-studio-frontend.onrender.com # Used in reset emails
       - key: ENABLE_HEAVY_RENDERING
-        value: "0" # Set to 1 only once the render pipeline (ffmpeg/whisper) is provisioned
+        value: "1"
       - key: MAX_FILE_SIZE_MB
-        value: "500"
+        value: "100"
       - key: MAX_TOTAL_STORAGE_PER_USER_MB
         value: "2048"
       - key: MAX_FILES_PER_USER
         value: "50"
       - key: MAX_CONCURRENT_JOBS
         value: "2"
-      - key: OUTPUT_RETENTION_HOURS
-        value: "24"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: clip-media
       - key: MAX_LOGIN_ATTEMPTS_PER_MIN
         value: "5"
       - key: MAX_REGISTRATIONS_PER_10MIN
@@ -67,7 +70,7 @@ services:
   - type: web
     name: clip-studio-frontend
     runtime: static
-    buildCommand: cd frontend && npm install && npm run build
+    buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
     routes:
       - type: rewrite

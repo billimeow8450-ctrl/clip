@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE TABLE IF NOT EXISTS jobs (
     id            VARCHAR(100) PRIMARY KEY,
     user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    project_id    VARCHAR(100),
+    project_id    VARCHAR(100) REFERENCES projects(id) ON DELETE CASCADE,
     type          VARCHAR(50) NOT NULL,
     status        VARCHAR(50) NOT NULL DEFAULT 'queued',
     progress      REAL NOT NULL DEFAULT 0.0,
@@ -114,8 +114,16 @@ CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires  ON revoked_tokens(expires
 --     DELETE FROM revoked_tokens  WHERE expires_at < now() - interval '1 day';
 --   $$);
 --
--- NOTE ON ROW LEVEL SECURITY (RLS): Supabase enables RLS by default only for
--- tables exposed through its auto-generated REST API. This app connects with
--- the direct Postgres connection string (service role, server-side only) and
--- never exposes the database to the browser, so RLS is neither required nor
--- used here. Do NOT publish this project's API keys client-side.
+-- ------------------------------------------------------------------- RLS ---
+-- The browser never needs Supabase's generated data API.  Deny anon and
+-- authenticated PostgREST roles even if an API key is accidentally exposed;
+-- the server's direct database role remains the only application data path.
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clips ENABLE ROW LEVEL SECURITY;
+ALTER TABLE files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE password_resets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE revoked_tokens ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON TABLE users, projects, jobs, clips, files, password_resets, revoked_tokens FROM anon, authenticated;

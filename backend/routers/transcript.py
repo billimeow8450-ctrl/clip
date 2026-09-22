@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..database import get_db
 from ..auth import get_current_user
@@ -16,10 +16,10 @@ router = APIRouter(prefix="/api/transcript", tags=["Transcript"])
 
 
 class TranscriptProcessRequest(BaseModel):
-    url_or_file: str
-    title: Optional[str] = "Transcription Project"
-    language: Optional[str] = "en"  # 'en', 'ur', 'ru', 'bilingual'
-    export_format: Optional[str] = "txt"  # 'txt', 'srt', 'pdf'
+    url_or_file: str = Field(min_length=1, max_length=2048)
+    title: Optional[str] = Field(default="Transcription Project", max_length=140)
+    language: Literal["en", "ur", "ru", "bilingual"] = "en"
+    export_format: Literal["txt", "srt", "pdf"] = "txt"
 
 
 class TranscriptProcessResponse(BaseModel):
