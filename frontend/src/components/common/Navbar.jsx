@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Scissors, FolderKanban, LogOut, FileText, WandSparkles, Menu, X } from 'lucide-react';
+import { Scissors, FolderKanban, LogOut, FileText, WandSparkles, Menu, ShieldCheck, X } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpenAuth }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -10,6 +10,7 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpen
     { id: 'transcriber', label: 'Transcriber', icon: FileText },
     { id: 'projects', label: 'Projects', icon: FolderKanban },
   ];
+  if (user?.is_admin) navItems.push({ id: 'admin', label: 'Admin', icon: ShieldCheck });
 
   const go = (id) => {
     setActiveTab(id);
@@ -24,17 +25,17 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, onOpen
           type="button"
           onClick={() => setActiveTab('landing')}
           className="flex items-center gap-2.5 cursor-pointer select-none group shrink-0"
-          aria-label="OpusPulse home"
+          aria-label="Manthan Ventures home"
         >
           <div className="w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
             <Scissors className="w-4 h-4 text-blue-400" />
           </div>
           <div className="flex items-center gap-2">
             <span className="font-display font-black text-xl tracking-tight text-slate-950 flex items-center">
-              Opus<span className="text-[#0066ff]">Pulse</span>
+              Manthan <span className="text-[#0066ff]">Ventures</span>
             </span>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-bold">
-              AI 2.5
+              STUDIO
             </span>
           </div>
         </button>

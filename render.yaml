@@ -59,6 +59,9 @@ services:
       # Rate limiting behind Render's proxy: one trusted proxy hop.
       - key: TRUSTED_PROXY_COUNT
         value: "1"
+      # Bootstrap allowlist for the protected admin console.
+      - key: ADMIN_EMAILS
+        sync: false
 
   # 2. React + Vite Frontend Static Site
   - type: web

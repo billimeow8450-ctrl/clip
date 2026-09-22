@@ -160,5 +160,14 @@ export const api = {
       // bare id path (`url_base`). Prefer the signed URL for downloads.
       return res;
     }
+  },
+
+  admin: {
+    async overview() {
+      return request('/api/admin/overview');
+    },
+    async users() {
+      return request('/api/admin/users');
+    }
   }
 };

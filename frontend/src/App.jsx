@@ -6,11 +6,12 @@ import AuthPage from './pages/AuthPage';
 import ClipperPage from './pages/ClipperPage';
 import EditorPage from './pages/EditorPage';
 import TranscriberPage from './pages/TranscriberPage';
+import AdminPage from './pages/AdminPage';
 import { api } from './api';
 import { Scissors, Zap, Shield, Sparkles } from 'lucide-react';
 
 export default function App() {
-  const validTabs = ['landing', 'clipper', 'editor', 'transcriber', 'projects'];
+  const validTabs = ['landing', 'clipper', 'editor', 'transcriber', 'projects', 'admin'];
   const readTabFromHash = () => {
     const candidate = window.location.hash.replace(/^#\/?/, '').split('/')[0];
     return validTabs.includes(candidate) ? candidate : 'landing';
@@ -102,6 +103,10 @@ export default function App() {
               />
             </div>
           )}
+
+          {activeTab === 'admin' && (
+            <div className="container-custom pt-10"><AdminPage user={user} /></div>
+          )}
         </main>
       </div>
 
@@ -122,14 +127,14 @@ export default function App() {
                   <Scissors className="w-4 h-4" />
                 </div>
                 <span className="font-display font-bold text-lg text-ink">
-                  Opus<span className="text-teal-600">Pulse</span> AI
+                  Manthan <span className="text-teal-600">Ventures</span>
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 uppercase font-semibold">
-                  PRO 2.5
+                  STUDIO
                 </span>
               </div>
               <p className="text-sm text-ink-muted max-w-sm leading-relaxed">
-                Autonomous video intelligence designed to turn long podcasts & videos into high-growth short-form audience engines.
+                Secure video intelligence for teams turning long-form stories into short-form momentum.
               </p>
             </div>
 
@@ -141,7 +146,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-8 text-ink-dim">
-            <p>© {new Date().getFullYear()} OpusPulse AI. Short-form video intelligence. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} Manthan Ventures. Video intelligence for ambitious teams.</p>
           </div>
         </div>
       </footer>

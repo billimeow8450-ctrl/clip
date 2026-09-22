@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import secrets
 import uuid
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
@@ -34,6 +36,29 @@ ACCESS_TOKEN_EXPIRE_DAYS = 7
 import bcrypt
 
 security = HTTPBearer()
+
+
+def reset_token_fingerprint(token: str) -> str:
+    """Return a keyed, non-reversible database representation of a reset token.
+
+    Reset tokens are bearer credentials. Storing the raw token meant anyone
+    with database read access could take over an account during its validity
+    window. The HMAC is deterministic for lookup but cannot be used as the
+    token itself.
+    """
+    return hmac.new(
+        SECRET_KEY.encode("utf-8"), token.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def is_admin_user(user: Dict[str, Any]) -> bool:
+    """Use a server-side bootstrap allowlist; never trust a client role claim."""
+    admin_emails = {
+        email.strip().lower()
+        for email in os.getenv("ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    }
+    return bool(admin_emails and str(user.get("email", "")).lower() in admin_emails)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

@@ -154,6 +154,17 @@ async def test_editor_rejects_invalid_source_type_and_timestamps(client, auth_us
     assert invalid_time.status_code == 400
 
 
+@pytest.mark.asyncio
+async def test_admin_api_requires_server_side_email_allowlist(client, auth_user, monkeypatch):
+    denied = await client.get("/api/admin/overview", headers=auth_user["headers"])
+    assert denied.status_code == 403
+
+    monkeypatch.setenv("ADMIN_EMAILS", auth_user["email"])
+    allowed = await client.get("/api/admin/overview", headers=auth_user["headers"])
+    assert allowed.status_code == 200
+    assert set(allowed.json()) == {"users", "projects", "jobs", "active_jobs", "files"}
+
+
 # ---------------------------------------------------------------------------
 # C4/M7: logout revokes the JWT server-side
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     email           VARCHAR(255) UNIQUE NOT NULL,
     username        VARCHAR(255) UNIQUE NOT NULL,
     hashed_password TEXT NOT NULL,
-    tier            VARCHAR(50) DEFAULT 'pro',
+    tier            VARCHAR(50) DEFAULT 'free',
     token_version   INTEGER NOT NULL DEFAULT 0, -- bumped on password reset; invalidates all JWTs
     created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE TABLE IF NOT EXISTS password_resets (
     id         VARCHAR(100) PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- This contains an HMAC fingerprint, never the raw reset bearer token.
     token      VARCHAR(255) UNIQUE NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     used       INTEGER DEFAULT 0,

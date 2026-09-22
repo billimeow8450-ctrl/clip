@@ -13,7 +13,9 @@ from ..auth import (
     verify_password,
     create_access_token,
     get_current_user,
+    is_admin_user,
     revoke_jti,
+    reset_token_fingerprint,
 )
 from ..utils.emailer import send_reset_email
 from ..utils.rate_limit import check_rate_limit, get_client_ip
@@ -74,6 +76,7 @@ class UserResponse(BaseModel):
     email: str
     username: str
     tier: str
+    is_admin: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -121,7 +124,7 @@ async def register(req: RegisterRequest, request: Request) -> AuthResponse:
         hashed = get_password_hash(req.password)
         cursor = await db.execute(
             "INSERT INTO users (email, username, hashed_password, tier, token_version) VALUES (?, ?, ?, ?, 0)",
-            (req.email.lower(), username, hashed, "pro"),
+            (req.email.lower(), username, hashed, "free"),
         )
         await db.commit()
         user_id = cursor.lastrowid
@@ -129,7 +132,7 @@ async def register(req: RegisterRequest, request: Request) -> AuthResponse:
     token = create_access_token({"sub": user_id})
     return AuthResponse(
         token=token,
-        user=UserResponse(id=user_id, email=req.email.lower(), username=username, tier="pro"),
+        user=UserResponse(id=user_id, email=req.email.lower(), username=username, tier="free", is_admin=is_admin_user({"email": req.email})),
     )
 
 
@@ -153,7 +156,10 @@ async def login(req: LoginRequest, request: Request) -> AuthResponse:
         )
         user = await cursor.fetchone()
 
-    if not user or not verify_password(req.password, user["hashed_password"]):
+    # Perform the same bcrypt work for an unknown account to avoid making
+    # account existence measurable from login response time.
+    password_hash = user["hashed_password"] if user else get_password_hash("not-a-real-password")
+    if not user or not verify_password(req.password, password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username/email or password",
@@ -163,7 +169,7 @@ async def login(req: LoginRequest, request: Request) -> AuthResponse:
     token = create_access_token({"sub": user["id"]}, token_version=int(user.get("token_version") or 0))
     return AuthResponse(
         token=token,
-        user=UserResponse(id=user["id"], email=user["email"], username=user["username"], tier=user["tier"]),
+        user=UserResponse(id=user["id"], email=user["email"], username=user["username"], tier=user["tier"], is_admin=is_admin_user(user)),
     )
 
 
@@ -174,6 +180,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)) -> UserRespon
         email=user["email"],
         username=user["username"],
         tier=user["tier"],
+        is_admin=is_admin_user(user),
     )
 
 
@@ -248,7 +255,7 @@ async def forgot_password(req: ForgotPasswordRequest, request: Request) -> Forgo
             INSERT INTO password_resets (id, user_id, token, expires_at, used)
             VALUES (?, ?, ?, ?, 0)
             """,
-            (reset_id, user_id, reset_token, expires_at),
+            (reset_id, user_id, reset_token_fingerprint(reset_token), expires_at),
         )
         await db.commit()
 
@@ -280,7 +287,7 @@ async def reset_password(req: ResetPasswordRequest, request: Request) -> ResetPa
             FROM password_resets
             WHERE token = ? AND used = 0
             """,
-            (clean_token,),
+            (reset_token_fingerprint(clean_token),),
         )
         reset_entry = await cursor.fetchone()
 

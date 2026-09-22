@@ -11,6 +11,7 @@ import { useJobPolling } from '../hooks/useJobPolling';
 
 const sampleClips = [
   {
+    isDemo: true,
     id: 'clip-1',
     score: 99,
     category: 'Monologue Hooks',
@@ -33,6 +34,7 @@ const sampleClips = [
     type: 'single'
   },
   {
+    isDemo: true,
     id: 'clip-2',
     score: 96,
     category: 'Monologue Hooks',
@@ -54,6 +56,7 @@ const sampleClips = [
     type: 'single'
   },
   {
+    isDemo: true,
     id: 'clip-3',
     score: 92,
     category: 'Multi-Speaker Debate',
@@ -75,6 +78,7 @@ const sampleClips = [
     type: 'split'
   },
   {
+    isDemo: true,
     id: 'clip-4',
     score: 89,
     category: 'Monologue Hooks',
@@ -345,7 +349,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                 <div className="absolute inset-x-8 inset-y-6 border-2 border-[#0066ff] rounded-xl flex flex-col justify-between p-2 pointer-events-none">
                   <div className="flex items-center justify-between text-[10px] font-mono text-white bg-black/80 px-2 py-0.5 rounded">
                     <span>AI FACE TRACKING</span>
-                    <span className="text-blue-400 font-bold">99.4%</span>
+                  <span className="text-blue-400 font-bold">Preview</span>
                   </div>
                   <div className="self-center px-2 py-0.5 rounded bg-blue-600 text-white font-mono text-[10px] font-bold">
                     9:16 VERTICAL LOCK
@@ -427,9 +431,9 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                   </p>
                 </div>
                 <div className="mt-4 flex items-center gap-2 text-[10px] font-mono text-slate-400">
-                  <span>98.7% Accuracy</span>
+                  <span>Caption preview</span>
                   <span>•</span>
-                  <span>34 Languages</span>
+                  <span>Editable styles</span>
                   <span>•</span>
                   <span>Auto Emojis</span>
                 </div>
@@ -443,7 +447,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                   </div>
                 </div>
                 <p className="text-sm text-slate-500 leading-relaxed">
-                  Auto-generated animated subtitles with 98.7% speech accuracy across 34 languages and viral keyword color highlights.
+                  Caption layouts, timing previews, and export-ready transcript formats for a practical editing workflow.
                 </p>
               </div>
             </div>
@@ -459,7 +463,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
               Explore the Latest Viral Formats
             </h2>
             <p className="text-base sm:text-lg text-slate-500 leading-relaxed font-normal">
-              Explore high-converting video styles tested across 50,000,000+ views to capture maximum retention.
+              Explore a set of editing concepts for the formats your team can build in the studio.
             </p>
           </div>
 
@@ -666,7 +670,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                 PREDICTIVE VIRALITY ENGINE
               </div>
               <h2 className="text-3xl sm:text-4xl font-display font-bold text-ink tracking-tight">
-                Clips Generated with Guaranteed Hook-Velocity
+                Clip concepts and recent results
               </h2>
             </div>
 
@@ -680,7 +684,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                     : 'bg-white text-ink-muted hover:text-ink border border-line'
                 }`}
               >
-                All Generated ({clips.length})
+                All ({clips.length})
               </button>
               <button
                 onClick={() => setActiveFilter('90')}
@@ -715,10 +719,10 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
             </div>
           </div>
 
-          {simNotice && (
+          {(simNotice || clips.some((clip) => clip.isDemo || clip.is_sample)) && (
             <div className="mb-6 p-3 rounded-xl bg-[#fffbeb] border border-[#fde68a] text-[#b45309] text-xs flex items-start gap-2" role="status">
               <Info className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>Simulation mode: these clips are placeholders generated without processing your video. Enable ENABLE_HEAVY_RENDERING on the server for real results.</span>
+              <span>Preview data is clearly marked and is not generated from your media. Real processing is available only when the server rendering pipeline is enabled.</span>
             </div>
           )}
 
@@ -746,7 +750,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/95 backdrop-blur-md border border-blue-200 shadow-xs">
                       <span className="w-2 h-2 rounded-full bg-[#0066ff] pulse-blue-dot"></span>
                       <span className="text-xs font-mono font-bold text-blue-800">
-                        {clip.score || clip.virality_score || 95} VIRAL INDEX
+                        {clip.isDemo || clip.is_sample ? 'DEMO PREVIEW' : `${clip.score || clip.virality_score || 0} SCORE`}
                       </span>
                     </div>
 
@@ -878,8 +882,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
               Computational Intelligence Behind Every Frame
             </h2>
             <p className="text-base sm:text-lg text-ink-muted">
-              OpusPulse doesn't simply cut videos randomly. It processes sentiment, audio decibels,
-              cadence, and social engagement patterns across 50,000,000+ viral posts.
+              Manthan Ventures gives creators one secure workspace for source intake, clip selection, timelines, and transcript exports.
             </p>
           </div>
 
@@ -895,8 +898,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                   AI Virality Score™ & Retention Modeling
                 </h3>
                 <p className="text-sm sm:text-base text-ink-muted max-w-xl mb-6 leading-relaxed">
-                  Our predictive neural engine analyzes speech inflection, narrative payoff, and initial 3-second
-                  visual interest to forecast watch-through rates before you ever hit publish.
+                  Use clip candidates and transcript context to make editorial decisions. Scores are directional signals, not a prediction or guarantee of reach.
                 </p>
               </div>
 
@@ -907,7 +909,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                     <span className="w-2.5 h-2.5 rounded-full bg-[#0066ff] pulse-blue-dot"></span>
                     Retention Probability Curve (0 - 60s)
                   </span>
-                  <span className="text-blue-700 font-bold">VIRALITY CONFIDENCE: 98.4%</span>
+                  <span className="text-blue-700 font-bold">EDITORIAL PREVIEW</span>
                 </div>
                 {/* Simulated retention curve bars */}
                 <div className="h-28 flex items-end gap-1.5 pt-4">
@@ -965,7 +967,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                   <div className="w-24 h-[90%] bg-blue-50/90 border-2 border-[#0066ff] rounded-lg flex flex-col items-center justify-center z-10 shadow-sm animate-float-slow backdrop-blur-xs">
                     <Users className="w-5 h-5 text-[#0066ff]" />
                     <span className="text-[9px] font-bold text-blue-800 mt-1">LOCKED (9:16)</span>
-                    <span className="text-[8px] font-mono text-blue-600 font-semibold">EYE CONFIDENCE 99.4%</span>
+                    <span className="text-[8px] font-mono text-blue-600 font-semibold">LAYOUT PREVIEW</span>
                   </div>
                 </div>
               </div>
@@ -981,8 +983,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                   Kinetic Captions & Smart Emojis
                 </h3>
                 <p className="text-sm sm:text-base text-ink-muted mb-6 leading-relaxed">
-                  World-class 98.7% speech accuracy across 34 languages. Highlights high-retention keywords
-                  automatically with Hormozi, Beast, and minimalist aesthetic presets.
+                  Select a caption style, inspect the transcript, and export the text formats your editing workflow needs.
                 </p>
               </div>
 
@@ -1152,7 +1153,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
                   <CheckCircle2 className="w-4 h-4 text-[#0066ff]" /> Sign up in under a minute
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-[#0066ff]" /> 4K Ultra-HD export
+                  <CheckCircle2 className="w-4 h-4 text-[#0066ff]" /> Transparent processing status
                 </span>
               </div>
             </div>
@@ -1168,7 +1169,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
               Frequently Asked Questions
             </h2>
             <p className="text-sm text-ink-dim">
-              Everything you need to know about OpusPulse AI Clipper
+              Everything you need to know about Manthan Ventures Studio
             </p>
           </div>
 
@@ -1176,19 +1177,19 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
             {[
               {
                 q: 'How does the AI Virality Score work?',
-                a: 'Our algorithm was trained on millions of viral vertical videos. It analyzes spoken hooks, hook delivery velocity, audio changes, narrative payoff, and emotional inflection to assign a score from 0 to 100.'
+                a: 'Scores are editorial signals based on the processing pipeline. They are not a guarantee of reach, watch time, or platform approval.'
               },
               {
                 q: 'How does active speaker detection work in 9:16 vertical crop?',
-                a: 'Our computer vision tracks facial landmarks and lips in real time. If one person speaks, they remain centered. If two podcast hosts debate, OpusPulse automatically generates a sleek split-screen layout.'
+                a: 'When the production pipeline is enabled, computer vision tracks facial landmarks and lips in real time. If one person speaks, they remain centered. If two podcast hosts debate, Manthan Ventures generates a clean split-screen layout.'
               },
               {
                 q: 'What video formats and platforms are supported?',
-                a: 'You can paste links from YouTube, Zoom, Twitch, and Rumble, or directly upload MP4, MOV, and MKV files. We export in 1080p and 4K vertical (9:16), square (1:1), and horizontal (16:9).'
+                a: 'The studio accepts approved video platform links and direct MP4, MOV, MKV, WEBM, AVI, MP3, WAV, or M4A uploads. Available render formats depend on the enabled server pipeline.'
               },
               {
                 q: 'Is it completely free to try?',
-                a: 'Yes! Every new creator gets 75 minutes of video processing free without entering a credit card.'
+                a: 'Account access does not require a card. Usage limits and processing availability are shown in the product rather than promised as a fixed allowance.'
               }
             ].map((faq, i) => (
               <div
@@ -1246,7 +1247,7 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
             </div>
 
             <div className="flex items-center justify-between gap-3 pt-2">
-              <span className="text-xs text-ink-dim font-mono">Export: 4K 60fps • 9:16</span>
+              <span className="text-xs text-ink-dim font-mono">Render settings are shown when processing is enabled</span>
               <a
                 href={selectedClip.videoUrl}
                 target="_blank"

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .database import init_db
-from .routers import auth, youtube, editor, clipper, transcript, jobs, files
+from .routers import admin, auth, youtube, editor, clipper, transcript, jobs, files
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +64,7 @@ app.add_middleware(
 
 # Register routers
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(youtube.router)
 app.include_router(editor.router)
 app.include_router(clipper.router)
