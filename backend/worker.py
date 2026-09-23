@@ -95,6 +95,11 @@ async def _download_youtube_with_broker(
         BrokerConfig(
             download_dir=work_dir,
             health_file=work_dir / "route-health.json",
+            # The web worker may run in a separate container from the private
+            # BgUtil provider.  Keep the bot's configurable endpoint instead
+            # of falling back to the broker's localhost default.
+            bgutil_base_url=os.getenv("BGUTIL_BASE_URL", "http://127.0.0.1:4416").strip()
+            or "http://127.0.0.1:4416",
             force_ipv4=True,
             concurrent_fragments=max(1, int(os.getenv("YTDLP_CONCURRENT_FRAGMENTS", "4"))),
             http_chunk_size=max(0, int(os.getenv("YTDLP_HTTP_CHUNK_SIZE", str(5 * 1024 * 1024)))),
