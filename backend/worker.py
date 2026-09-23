@@ -126,13 +126,26 @@ async def _resolve_input_file(source_url: Optional[str], job_id: str) -> Optiona
 
         def _download() -> Path:
             options = {
-                "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
                 "outtmpl": template,
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
                 "max_filesize": int(os.getenv("MAX_EXTERNAL_SOURCE_MB", "1024")) * 1024 * 1024,
             }
+            is_youtube = any(host in source_url.lower() for host in ("youtube.com", "youtu.be"))
+            if is_youtube:
+                # YouTube increasingly challenges high-quality web-client
+                # streams from datacenter IPs. Its Android client exposes a
+                # combined H.264/AAC MP4 (itag 18) for this class of public
+                # video without requiring a user's browser cookies. Prefer it
+                # for reliable server-side ingestion, then fall back to other
+                # <=480p MP4 streams if a particular video lacks it.
+                options.update({
+                    "format": "18/best[height<=480][ext=mp4]/best[height<=480]",
+                    "extractor_args": {"youtube": {"player_client": ["android"]}},
+                })
+            else:
+                options["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(source_url, download=True)
                 filename = Path(ydl.prepare_filename(info))
