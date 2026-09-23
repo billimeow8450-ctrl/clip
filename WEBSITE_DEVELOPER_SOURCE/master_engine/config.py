@@ -10,8 +10,11 @@ from .models import CaptionStyle
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 ASSET_DIR = Path(os.getenv("MASTER_ENGINE_ASSETS", str(PACKAGE_DIR / "assets")))
-WORK_DIR = Path(os.getenv("MASTER_ENGINE_WORK", "/root/editingbot_v78/master_engine_jobs"))
-CACHE_DIR = Path(os.getenv("MASTER_ENGINE_CACHE", "/root/editingbot_v78/master_engine_cache"))
+# The web service runs as an unprivileged container user.  /root defaults made
+# MasterEngine fail before it could render on Render, even when FFmpeg and
+# Whisper were installed.  Deployment environments can still override these.
+WORK_DIR = Path(os.getenv("MASTER_ENGINE_WORK", "/tmp/clip-studio/master_engine_jobs"))
+CACHE_DIR = Path(os.getenv("MASTER_ENGINE_CACHE", "/tmp/clip-studio/master_engine_cache"))
 
 
 @dataclass(frozen=True)

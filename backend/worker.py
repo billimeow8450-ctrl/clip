@@ -9,6 +9,7 @@ import sys
 import time
 import uuid
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -59,7 +60,9 @@ def spawn_job(coro) -> None:
     task.add_done_callback(_BG_TASKS.discard)
 
 
-async def _download_youtube_with_broker(source_url: str, work_dir: Path, job_id: str) -> Path:
+async def _download_youtube_with_broker(
+    source_url: str, work_dir: Path, job_id: str, *, target_height: int = 480
+) -> Path:
     """Use the Telegram bot's multi-route YouTube transport for web jobs.
 
     A single yt-dlp request is brittle from cloud IP addresses. The established
@@ -88,8 +91,12 @@ async def _download_youtube_with_broker(source_url: str, work_dir: Path, job_id:
     result = await broker.download_video(
         source_url,
         stem=f"source_{job_id}",
-        formats=(FormatCandidate("bestvideo[height<=480]+bestaudio/best[height<=480]/best", "mp4", True),),
-        target_height=480,
+        formats=(FormatCandidate(
+            f"bestvideo[height<={target_height}]+bestaudio/best[height<={target_height}]/best",
+            "mp4",
+            True,
+        ),),
+        target_height=target_height,
         progress_cb=None,
         cancel_event=None,
     )
@@ -144,7 +151,9 @@ async def claim_job(job_id: str) -> bool:
         return row is not None
 
 
-async def _resolve_input_file(source_url: Optional[str], job_id: str) -> Optional[Path]:
+async def _resolve_input_file(
+    source_url: Optional[str], job_id: str, *, youtube_height: int = 480
+) -> Optional[Path]:
     """Materialize an owned upload into an isolated short-lived work path."""
     upload_id = get_local_upload_id(source_url or "")
     if not upload_id:
@@ -194,7 +203,9 @@ async def _resolve_input_file(source_url: Optional[str], job_id: str) -> Optiona
                 return max(candidates, key=lambda p: p.stat().st_size)
 
         if any(host in source_url.lower() for host in ("youtube.com", "youtu.be")):
-            return await _download_youtube_with_broker(source_url, work_dir, job_id)
+            return await _download_youtube_with_broker(
+                source_url, work_dir, job_id, target_height=youtube_height
+            )
         return await asyncio.to_thread(_download)
     if using_object_storage():
         work_dir = UPLOAD_DIR / ".work"
@@ -367,8 +378,8 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
         source_url = params.get("source_url")
         start_seconds = float(params.get("start_seconds", 0) or 0)
         end_seconds = float(params.get("end_seconds", 60) or 60)
-        caption_style = params.get("caption_style", "hormozi")
-        layout_mode = params.get("layout_mode", "focus")
+        caption_style = params.get("caption_style", "auto")
+        layout_mode = params.get("layout_mode", "auto")
 
         duration = max(1.0, end_seconds - start_seconds)
 
@@ -377,25 +388,51 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
             try:
                 from master_engine.engine import MasterEngine
                 from master_engine.config import Settings
+                from master_engine.media import extract_range
 
-                input_file = await _resolve_input_file(source_url, job_id)
+                # The previous website integration sent the whole source to the
+                # editor, silently ignoring the timeline.  The bot's range-first
+                # editor is the correct model: materialize a bounded source range,
+                # then run the production editor over that exact media.
+                input_file = await _resolve_input_file(source_url, job_id, youtube_height=1080)
                 output_file = OUTPUT_DIR / f"edited_{job_id}.mp4"
 
                 if input_file and input_file.exists():
-                    await update_job_status(job_id, "processing", 45.0, "Rendering with MasterEngine...")
-                    settings = Settings(fps=30.0, width=1080, height=1920)
+                    source_duration = await asyncio.to_thread(_source_duration_seconds, input_file)
+                    if start_seconds >= source_duration:
+                        raise RuntimeError("The selected start time is outside the source video")
+                    bounded_end = min(end_seconds, source_duration)
+                    if bounded_end - start_seconds < 1.0:
+                        raise RuntimeError("The selected range is too short after matching the source video")
+                    range_file = UPLOAD_DIR / ".work" / job_id / "editor_range.mp4"
+                    await update_job_status(job_id, "processing", 35.0, "Extracting selected timeline range...")
+                    await asyncio.to_thread(extract_range, input_file, range_file, start_seconds, bounded_end)
+                    await update_job_status(job_id, "processing", 55.0, "Applying smart framing and word-synced captions...")
+                    settings = Settings.from_env()
+                    settings = replace(
+                        settings,
+                        width=1080,
+                        height=1920,
+                        captions_enabled=caption_style != "none",
+                        # The bot's engine makes safe multi-speaker decisions
+                        # automatically.  "focus" is retained as a conservative
+                        # single-subject preference by disabling split layouts.
+                        split_enabled=layout_mode != "focus",
+                        caption_scope=f"web-user-{user_id}",
+                    )
                     engine = MasterEngine(settings=settings)
-                    # ``MasterEngine`` exposes ``run_job``/``run``; an earlier
-                    # integration called a nonexistent ``process`` method, so
-                    # heavy rendering always fell back to a fake result.
-                    await asyncio.to_thread(engine.run_job, input_file, output_file)
+                    engine_result = await asyncio.to_thread(engine.run_job, range_file, output_file)
                     await _persist_output(output_file, output_file.name)
                     _cleanup_workfile(input_file)
                     result = {
                         "output_video": sign_file_url(f"edited_{job_id}.mp4", user_id),
-                        "duration": duration,
+                        "duration": round(bounded_end - start_seconds, 2),
+                        "start_seconds": round(start_seconds, 2),
+                        "end_seconds": round(bounded_end, 2),
                         "caption_style": caption_style,
                         "layout": layout_mode,
+                        "engine": "Master Editor",
+                        "captionless_output_available": bool(engine_result.get("captionless_output")),
                         "is_simulation": False,
                     }
                 else:

@@ -23,8 +23,11 @@ class EditorProcessRequest(BaseModel):
     thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
     start_seconds: float
     end_seconds: float
-    caption_style: Literal["hormozi", "minimal", "bold"] = "hormozi"
-    layout_mode: Literal["focus", "split", "auto"] = "focus"
+    # The bot's editor dynamically chooses a readable word-synced template.
+    # Expose only controls the web renderer can honor instead of accepting
+    # display-only style names that were silently ignored.
+    caption_style: Literal["auto", "none"] = "auto"
+    layout_mode: Literal["focus", "auto"] = "auto"
 
 
 class EditorProcessResponse(BaseModel):

@@ -19,8 +19,8 @@ export default function EditorPage({ user, onRequireAuth }) {
   const [duration, setDuration] = useState(600);
 
   // Styling options
-  const [captionStyle, setCaptionStyle] = useState('hormozi');
-  const [layoutMode, setLayoutMode] = useState('focus');
+  const [captionStyle, setCaptionStyle] = useState('auto');
+  const [layoutMode, setLayoutMode] = useState('auto');
 
   // Job & processing states
   const [fetchingMeta, setFetchingMeta] = useState(false);
@@ -119,7 +119,7 @@ export default function EditorPage({ user, onRequireAuth }) {
           Timeline Video Editor
         </h1>
         <p className="text-xs md:text-sm text-[#526173] mt-1">
-          Select exact start and end seconds. Range-first transport downloads only your selected slice, re-centering active speakers to 9:16.
+          Select exact start and end seconds. Your exact range is extracted before the production editor applies smart 9:16 framing and word-synced captions.
         </p>
       </div>
 
@@ -181,7 +181,7 @@ export default function EditorPage({ user, onRequireAuth }) {
               </button>
             </div>
             <p className="text-[11px] text-[#64748b] mt-1 font-mono">
-              Metadata fetched in &lt;1.5s via range-first query without full video download.
+              Loading metadata does not process the video. Rendering starts only after you confirm the selected range.
             </p>
           </div>
         ) : (
@@ -253,15 +253,12 @@ export default function EditorPage({ user, onRequireAuth }) {
           {/* Caption Style */}
           <div>
             <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
-              Caption Typography Preset
+              Captions
             </div>
-            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Caption style">
+            <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Caption style">
               {[
-                { id: 'hormozi', label: '🔥 Hormozi' },
-                { id: 'mrbeast', label: '⚡ MrBeast' },
-                { id: 'neon', label: '✨ Neon' },
-                { id: 'clean', label: '◻️ Clean' },
-                { id: 'none', label: '🚫 None' },
+                { id: 'auto', label: '✨ Smart word-sync' },
+                { id: 'none', label: '🚫 No captions' },
               ].map((style) => (
                 <button
                   key={style.id}
@@ -283,14 +280,12 @@ export default function EditorPage({ user, onRequireAuth }) {
           {/* Reframing Layout */}
           <div>
             <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
-              Framing & Geometry Layout
+              Smart Framing
             </div>
             <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Layout mode">
               {[
-                { id: 'focus', label: '🎯 Focus (1 Speaker)' },
-                { id: 'duo_context', label: '👥 Duo Split Screen' },
-                { id: 'fit_blur', label: '💧 Fit with Blur' },
-                { id: 'passthrough', label: '↔️ Original Aspect' },
+                { id: 'auto', label: '✨ Auto (speaker-aware)' },
+                { id: 'focus', label: '🎯 Prefer one speaker' },
               ].map((layout) => (
                 <button
                   key={layout.id}
