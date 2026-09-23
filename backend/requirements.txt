@@ -10,6 +10,9 @@ aiosqlite>=0.20.0
 python-dotenv>=1.0.1
 aiofiles>=23.2.1
 yt-dlp>=2024.3.10
+# Supplies proof-of-origin tokens from the internal BgUtil provider for
+# YouTube's mweb client. Keep this pinned to the matching provider image.
+bgutil-ytdlp-pot-provider==2.0.0
 pytubefix>=11,<12
 httpx>=0.27.0
 pytest>=8.0.0
