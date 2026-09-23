@@ -67,6 +67,8 @@ async def _download_youtube_with_broker(
     job_id: str,
     *,
     target_height: int = 480,
+    start_seconds: Optional[float] = None,
+    end_seconds: Optional[float] = None,
     progress_cb: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Path:
     """Use the Telegram bot's multi-route YouTube transport for web jobs.
@@ -112,18 +114,31 @@ async def _download_youtube_with_broker(
         cookie_getter=lambda: cookie_path if cookie_path.is_file() else None,
         proxy_getter=lambda: proxies,
     )
-    result = await broker.download_video(
-        source_url,
-        stem=f"source_{job_id}",
-        formats=(FormatCandidate(
-            f"bestvideo[height<={target_height}]+bestaudio/best[height<={target_height}]/best",
-            "mp4",
-            True,
-        ),),
-        target_height=target_height,
-        progress_cb=progress_cb,
-        cancel_event=None,
-    )
+    formats = (FormatCandidate(
+        f"bestvideo[height<={target_height}]+bestaudio/best[height<={target_height}]/best",
+        "mp4",
+        True,
+    ),)
+    if start_seconds is not None and end_seconds is not None:
+        result = await broker.download_timestamp(
+            source_url,
+            stem=f"source_{job_id}",
+            formats=formats,
+            start=start_seconds,
+            end=end_seconds,
+            target_height=target_height,
+            progress_cb=progress_cb,
+            cancel_event=None,
+        )
+    else:
+        result = await broker.download_video(
+            source_url,
+            stem=f"source_{job_id}",
+            formats=formats,
+            target_height=target_height,
+            progress_cb=progress_cb,
+            cancel_event=None,
+        )
     return result.path.resolve()
 
 
@@ -207,6 +222,8 @@ async def _resolve_input_file(
     job_id: str,
     *,
     youtube_height: int = 480,
+    youtube_start_seconds: Optional[float] = None,
+    youtube_end_seconds: Optional[float] = None,
     progress_cb: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Optional[Path]:
     """Materialize an owned upload into an isolated short-lived work path."""
@@ -259,7 +276,13 @@ async def _resolve_input_file(
 
         if any(host in source_url.lower() for host in ("youtube.com", "youtu.be")):
             return await _download_youtube_with_broker(
-                source_url, work_dir, job_id, target_height=youtube_height, progress_cb=progress_cb
+                source_url,
+                work_dir,
+                job_id,
+                target_height=youtube_height,
+                start_seconds=youtube_start_seconds,
+                end_seconds=youtube_end_seconds,
+                progress_cb=progress_cb,
             )
         return await asyncio.to_thread(_download)
     if using_object_storage():
@@ -472,19 +495,36 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                 # spend many minutes cycling bot-challenged routes on cloud IPs;
                 # the production editor still produces its 1080x1920 delivery
                 # master, but fails fast only when no playable source exists.
-                input_file = await _resolve_input_file(source_url, job_id, youtube_height=480)
+                source_is_youtube = source_type == "youtube" and bool(source_url)
+
+                async def _source_progress(message: str) -> None:
+                    # Transport messages are fixed route labels, not URLs or
+                    # credentials.  Surface them so the UI reflects the real
+                    # source-download phase instead of a frozen generic stage.
+                    await update_job_status(job_id, "processing", 25.0, message[:180])
+
+                input_file = await _resolve_input_file(
+                    source_url,
+                    job_id,
+                    youtube_height=480,
+                    youtube_start_seconds=start_seconds if source_is_youtube else None,
+                    youtube_end_seconds=end_seconds if source_is_youtube else None,
+                    progress_cb=_source_progress,
+                )
                 output_file = OUTPUT_DIR / f"edited_{job_id}.mp4"
 
                 if input_file and input_file.exists():
                     source_duration = await asyncio.to_thread(_source_duration_seconds, input_file)
-                    if start_seconds >= source_duration:
+                    if not source_is_youtube and start_seconds >= source_duration:
                         raise RuntimeError("The selected start time is outside the source video")
-                    bounded_end = min(end_seconds, source_duration)
-                    if bounded_end - start_seconds < 1.0:
+                    bounded_end = source_duration if source_is_youtube else min(end_seconds, source_duration)
+                    if (source_duration if source_is_youtube else bounded_end - start_seconds) < 1.0:
                         raise RuntimeError("The selected range is too short after matching the source video")
-                    range_file = UPLOAD_DIR / ".work" / job_id / "editor_range.mp4"
-                    await update_job_status(job_id, "processing", 35.0, "Extracting selected timeline range...")
-                    await asyncio.to_thread(extract_range, input_file, range_file, start_seconds, bounded_end)
+                    range_file = input_file
+                    if not source_is_youtube:
+                        range_file = UPLOAD_DIR / ".work" / job_id / "editor_range.mp4"
+                        await update_job_status(job_id, "processing", 35.0, "Extracting selected timeline range...")
+                        await asyncio.to_thread(extract_range, input_file, range_file, start_seconds, bounded_end)
                     await update_job_status(job_id, "processing", 55.0, "Applying smart framing and word-synced captions...")
                     settings = Settings.from_env()
                     settings = replace(
@@ -504,9 +544,9 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                     _cleanup_workfile(input_file)
                     result = {
                         "output_video": sign_file_url(f"edited_{job_id}.mp4", user_id),
-                        "duration": round(bounded_end - start_seconds, 2),
+                        "duration": round(source_duration if source_is_youtube else bounded_end - start_seconds, 2),
                         "start_seconds": round(start_seconds, 2),
-                        "end_seconds": round(bounded_end, 2),
+                        "end_seconds": round(end_seconds if source_is_youtube else bounded_end, 2),
                         "caption_style": caption_style,
                         "layout": layout_mode,
                         "engine": "Master Editor",
