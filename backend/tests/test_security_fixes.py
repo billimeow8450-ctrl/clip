@@ -160,6 +160,7 @@ def test_youtube_proxy_format_matches_bot_runtime_format():
 
     normalized = _normalize_proxy_url("proxy.example:443:user-name:pa$$word")
     assert normalized == "http://user-name:pa%24%24word@proxy.example:443"
+    assert _normalize_proxy_url('"http://proxy.example:443"') == "http://proxy.example:443"
     assert _normalize_proxy_url("") is None
     with pytest.raises(ValueError):
         _normalize_proxy_url("proxy.example:not-a-port:user:password")

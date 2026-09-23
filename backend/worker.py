@@ -124,7 +124,10 @@ async def _download_youtube_with_broker(
 
 def _normalize_proxy_url(raw: str) -> Optional[str]:
     """Accept the bot's host:port:user:password form without exposing secrets."""
-    value = (raw or "").strip()
+    # Render's .env export may retain enclosing quotes when consumed by Docker's
+    # --env-file parser. Treat those quotes as configuration syntax, not as part
+    # of the proxy scheme/host, so both exported and manually entered values work.
+    value = (raw or "").strip().strip("'\"")
     if not value:
         return None
     if any(char.isspace() for char in value):
