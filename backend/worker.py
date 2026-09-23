@@ -249,15 +249,20 @@ def _source_duration_seconds(source: Path) -> float:
     return duration
 
 
-def _render_vertical_clip(source: Path, destination: Path, start: float, duration: float) -> None:
+def _render_vertical_clip(
+    source: Path, destination: Path, start: float, duration: float, *, output_width: int = 1080
+) -> None:
     """Render a genuine centre-cropped 9:16 H.264/AAC clip using ffmpeg."""
+    if output_width not in (720, 1080):
+        raise ValueError("Unsupported output width")
+    output_height = round(output_width * 16 / 9)
     destination.parent.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
         [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}",
             "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "-vf", f"scale={output_width}:{output_height}:force_original_aspect_ratio=increase,crop={output_width}:{output_height}",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart", str(destination),
@@ -295,6 +300,19 @@ def _parse_target_len(target_duration: Optional[str]) -> float:
     if value <= 0:
         return 60.0
     return value
+
+
+def _resolve_target_len(target_duration: Optional[str], source_duration: float) -> float:
+    """Choose a bounded duration for the bot-compatible Auto Best Length mode."""
+    if str(target_duration or "").strip().lower() != "auto":
+        return _parse_target_len(target_duration)
+    # Short sources work better as a concise hook, while longer conversations
+    # have enough context to justify a 60s delivery clip.
+    if source_duration <= 180:
+        return min(30.0, source_duration)
+    if source_duration <= 600:
+        return 45.0
+    return 60.0
 
 
 def _clipper_error_message(exc: Exception, source_url: Optional[str]) -> str:
@@ -490,55 +508,66 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
 
         url = params.get("url")
         target_duration = str(params.get("target_duration", "60"))
-        target_len = _parse_target_len(target_duration)
+        requested_clip_count = int(params.get("clip_count", 3))
+        clip_count = requested_clip_count if requested_clip_count in (1, 3, 5) else 3
+        output_width = int(params.get("output_quality", "1080"))
+        if output_width not in (720, 1080):
+            output_width = 1080
+        analysis_mode = params.get("analysis_mode", "quick")
 
         clips: list = []
         input_file: Optional[Path] = None
 
         if ENABLE_HEAVY_RENDERING:
-            await update_job_status(job_id, "processing", 30.0, "Executing viral research engine & comment scoring...")
-            try:
-                from viral_research_engine import collect_research
-                from .routers.youtube import extract_video_id
+            if analysis_mode == "deep":
+                await update_job_status(job_id, "processing", 30.0, "Analyzing public comment signals for viral moments...")
+                try:
+                    from viral_research_engine import collect_research
+                    from .routers.youtube import extract_video_id
 
-                video_id = extract_video_id(url) if url else None
-                research_data: Dict[str, Any] = {}
-                if video_id:
-                    research_data = await asyncio.to_thread(
-                        collect_research, url, video_id, params.get("title", "Video")
-                    )
+                    video_id = extract_video_id(url) if url else None
+                    research_data: Dict[str, Any] = {}
+                    if video_id:
+                        research_data = await asyncio.to_thread(
+                            collect_research, url, video_id, params.get("title", "Video")
+                        )
 
-                comment_scores = research_data.get("comment_scores", {})
-                if comment_scores:
-                    sorted_moments = sorted(comment_scores.items(), key=lambda x: x[1], reverse=True)[:5]
-                    for idx, (ts, score) in enumerate(sorted_moments):
-                        st = max(0.0, float(ts) - 3.0)
-                        en = st + target_len
-                        clip_id = f"clip_{uuid.uuid4().hex[:8]}"
-                        clips.append({
-                            "id": clip_id,
-                            "title": f"Viral Moment #{idx + 1} ({int(score)}% engagement)",
-                            "start_time": st,
-                            "viral_score": round(score, 1),
-                            "hook_text": f"High engagement signal near {int(ts)}s from public comments analysis",
-                            "thumbnail_url": params.get("thumbnail_url") or FALLBACK_THUMBNAIL,
-                            "is_sample": False,
-                        })
-            except Exception as research_err:
-                logger.warning("Viral research engine warning: %s", research_err)
+                    comment_scores = research_data.get("comment_scores", {})
+                    if comment_scores:
+                        sorted_moments = sorted(comment_scores.items(), key=lambda x: x[1], reverse=True)[:clip_count]
+                        for idx, (ts, score) in enumerate(sorted_moments):
+                            st = max(0.0, float(ts) - 3.0)
+                            clip_id = f"clip_{uuid.uuid4().hex[:8]}"
+                            clips.append({
+                                "id": clip_id,
+                                "title": f"Viral Moment #{idx + 1} ({int(score)}% engagement)",
+                                "start_time": st,
+                                "viral_score": round(score, 1),
+                                "hook_text": f"High engagement signal near {int(ts)}s from public comments analysis",
+                                "thumbnail_url": params.get("thumbnail_url") or FALLBACK_THUMBNAIL,
+                                "is_sample": False,
+                            })
+                except Exception as research_err:
+                    logger.warning("Viral research engine warning: %s", research_err)
+            else:
+                await update_job_status(job_id, "processing", 30.0, "Preparing fast source-based clip candidates...")
 
             await update_job_status(job_id, "processing", 55.0, "Downloading and preparing source video...")
             input_file = await _resolve_input_file(url, job_id)
             if not input_file or not input_file.exists():
                 raise RuntimeError("The source video could not be retrieved for clip rendering")
             source_duration = await asyncio.to_thread(_source_duration_seconds, input_file)
+            target_len = _resolve_target_len(target_duration, source_duration)
 
             # Public comment data is not reliably available for every video. In that
             # case create real, evenly distributed excerpts and say so plainly rather
             # than fabricating retention scores or placeholder URLs.
             if not clips:
                 max_start = max(0.0, source_duration - min(target_len, source_duration))
-                starts = [0.0] if max_start == 0 else [round(max_start * ratio, 1) for ratio in (0.0, 0.5, 1.0)]
+                if max_start == 0:
+                    starts = [0.0]
+                else:
+                    starts = [round(max_start * index / max(clip_count - 1, 1), 1) for index in range(clip_count)]
                 clips = [
                     {
                         "id": f"clip_{uuid.uuid4().hex[:8]}",
@@ -561,13 +590,17 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
                     continue
                 filename = f"clip_{job_id}_{index}.mp4"
                 output_file = OUTPUT_DIR / filename
-                await asyncio.to_thread(_render_vertical_clip, input_file, output_file, start, duration)
+                await asyncio.to_thread(
+                    _render_vertical_clip, input_file, output_file, start, duration, output_width=output_width
+                )
                 await _persist_output(output_file, filename)
                 clip.update({
                     "start_time": round(start, 1),
                     "end_time": round(start + duration, 1),
                     "duration": round(duration, 1),
                     "video_url": sign_file_url(filename, user_id),
+                    "output_quality": f"{output_width}p",
+                    "output_resolution": f"{output_width}×{round(output_width * 16 / 9)}",
                 })
                 rendered_clips.append(clip)
             clips = rendered_clips
@@ -607,6 +640,9 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
         result = {
             "clips_count": len(clips),
             "clips": clips,
+            "analysis_mode": analysis_mode,
+            "target_duration": "Auto best length" if target_duration == "auto" else f"{target_len:.0f}s",
+            "output_quality": f"{output_width}p",
             "is_simulation": not ENABLE_HEAVY_RENDERING,
             "simulation_notice": SIMULATION_NOTICE if not ENABLE_HEAVY_RENDERING else None,
         }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Scissors, Sparkles, Upload, Download, CheckCircle2, Loader2, AlertCircle, Flame, Info } from 'lucide-react';
+import { Sparkles, Upload, Download, CheckCircle2, Loader2, AlertCircle, Flame, Info, Zap, Brain, MonitorUp } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
 import { api, resolveApiUrl } from '../api';
 import { useJobPolling } from '../hooks/useJobPolling';
@@ -10,7 +10,9 @@ export default function ClipperPage({ user, onRequireAuth }) {
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
   const [analysisMode, setAnalysisMode] = useState('deep'); // 'quick' or 'deep'
-  const [targetDuration, setTargetDuration] = useState('60'); // '30', '60', '90', '120', 'all'
+  const [targetDuration, setTargetDuration] = useState('auto');
+  const [outputQuality, setOutputQuality] = useState('1080');
+  const [clipCount, setClipCount] = useState(3);
   const [loading, setLoading] = useState(false);
   const [clips, setClips] = useState([]);
   const [error, setError] = useState('');
@@ -68,6 +70,8 @@ export default function ClipperPage({ user, onRequireAuth }) {
         title: file ? file.name : 'YouTube Viral Clip Analysis',
         analysis_mode: analysisMode,
         target_duration: targetDuration,
+        output_quality: outputQuality,
+        clip_count: clipCount,
       });
 
       startPolling({ id: res.job_id, status: 'queued', progress: 0, stage: 'Queued' });
@@ -165,7 +169,7 @@ export default function ClipperPage({ user, onRequireAuth }) {
                       : 'bg-white text-[#526173] border-[#d4dee4] hover:bg-[#eaf0f2]'
                   }`}
                 >
-                  ⚡ Quick Heuristic
+                  <Zap className="w-3.5 h-3.5 inline mr-1" aria-hidden="true" />Quick
                 </button>
                 <button
                   type="button"
@@ -177,7 +181,7 @@ export default function ClipperPage({ user, onRequireAuth }) {
                       : 'bg-white text-[#526173] border-[#d4dee4] hover:bg-[#eaf0f2]'
                   }`}
                 >
-                  🔥 Deep Comment AI
+                  <Brain className="w-3.5 h-3.5 inline mr-1" aria-hidden="true" />Deep analysis
                 </button>
               </div>
             </div>
@@ -187,8 +191,8 @@ export default function ClipperPage({ user, onRequireAuth }) {
               <div className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">
                 Target Clip Duration
               </div>
-              <div className="grid grid-cols-4 gap-1.5" role="group" aria-label="Target clip duration">
-                {['30', '60', '90', '120'].map((dur) => (
+              <div className="grid grid-cols-5 gap-1.5" role="group" aria-label="Target clip duration">
+                {['auto', '30', '60', '90', '120'].map((dur) => (
                   <button
                     key={dur}
                     type="button"
@@ -200,11 +204,38 @@ export default function ClipperPage({ user, onRequireAuth }) {
                         : 'bg-white text-[#526173] border-[#d4dee4] hover:bg-[#eaf0f2]'
                     }`}
                   >
-                    {`${dur}s`}
+                    {dur === 'auto' ? 'Auto' : `${dur}s`}
                   </button>
                 ))}
               </div>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <fieldset>
+              <legend className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">Output quality</legend>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Output quality">
+                {[['720', '720p', 'Faster delivery'], ['1080', '1080p', 'Best available quality']].map(([value, label, hint]) => (
+                  <button key={value} type="button" role="radio" aria-checked={outputQuality === value} onClick={() => setOutputQuality(value)} className={`text-left py-2 px-3 rounded-[9px] font-semibold border transition-colors ${outputQuality === value ? 'bg-[#edf5f3] text-[#0f766e] border-[#c4e3dc]' : 'bg-white text-[#526173] border-[#d4dee4] hover:bg-[#eaf0f2]'}`}>
+                    <span className="block text-xs"><MonitorUp className="w-3.5 h-3.5 inline mr-1" aria-hidden="true" />{label}</span>
+                    <span className="block text-[10px] font-normal mt-0.5">{hint}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-[#64748b] mt-1.5">1080p is the current maximum. We do not upscale to a fake 2K file.</p>
+            </fieldset>
+
+            <fieldset>
+              <legend className="block text-[11px] font-mono font-bold uppercase tracking-[0.06em] text-[#526173] mb-1.5">Best candidates to render</legend>
+              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Number of clip candidates">
+                {[1, 3, 5].map((count) => (
+                  <button key={count} type="button" role="radio" aria-checked={clipCount === count} onClick={() => setClipCount(count)} className={`text-xs py-2 px-2 rounded-[9px] font-semibold border transition-colors ${clipCount === count ? 'bg-[#0f172a] text-white border-[#0f172a]' : 'bg-white text-[#526173] border-[#d4dee4] hover:bg-[#eaf0f2]'}`}>
+                    {count} {count === 1 ? 'clip' : 'clips'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-[#64748b] mt-1.5">Deep analysis ranks comment-led moments. Quick creates evenly spaced source candidates faster.</p>
+            </fieldset>
           </div>
 
           {(error || jobError) && (
@@ -261,7 +292,7 @@ export default function ClipperPage({ user, onRequireAuth }) {
             />
           </div>
           <div className="text-[11px] text-[#64748b] mt-2 font-mono">
-            Pipeline: Whisper Speech Alignment → YuNet Face Tracking → 9:16 Encode
+            {analysisMode === 'deep' ? 'Pipeline: public comment signals → source ingest → 9:16 render' : 'Pipeline: source ingest → fast candidate selection → 9:16 render'}
           </div>
         </div>
       )}
@@ -285,7 +316,7 @@ export default function ClipperPage({ user, onRequireAuth }) {
               Generated Viral Candidates ({clips.length})
             </h2>
             <span className="text-xs font-mono text-[#526173]">
-              Format: 9:16 Vertical MP4
+              Format: 9:16 Vertical MP4 · {clips[0]?.output_quality || `${outputQuality}p`}
             </span>
           </div>
 
@@ -321,6 +352,11 @@ export default function ClipperPage({ user, onRequireAuth }) {
                     {typeof clip.duration === 'number' && (
                       <div className="absolute top-2.5 right-2.5 px-1.5 py-0.5 rounded-[4px] bg-black/60 text-white font-mono text-[10px] font-medium tabular-nums">
                         {Math.round(clip.duration)}s
+                      </div>
+                    )}
+                    {clip.output_quality && (
+                      <div className="absolute top-9 right-2.5 px-1.5 py-0.5 rounded-[4px] bg-black/60 text-white font-mono text-[10px] font-medium">
+                        {clip.output_quality}
                       </div>
                     )}
 

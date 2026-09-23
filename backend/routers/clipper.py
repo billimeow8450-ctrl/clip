@@ -20,7 +20,11 @@ class ClipperProcessRequest(BaseModel):
     title: Optional[str] = Field(default="Auto Clipper Project", max_length=140)
     thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
     analysis_mode: Literal["quick", "deep"] = "quick"
-    target_duration: Literal["30", "60", "90", "120"] = "60"
+    # Keep this in sync with the public selector.  "auto" mirrors the bot's
+    # Auto Best Length option while keeping the final render duration bounded.
+    target_duration: Literal["auto", "30", "60", "90", "120"] = "auto"
+    output_quality: Literal["720", "1080"] = "1080"
+    clip_count: Literal[1, 3, 5] = 3
 
 
 class ClipperProcessResponse(BaseModel):

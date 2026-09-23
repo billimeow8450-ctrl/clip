@@ -138,6 +138,23 @@ async def test_processing_rejects_another_users_local_upload(client, auth_user, 
 
 
 @pytest.mark.asyncio
+async def test_clipper_rejects_unsupported_render_options(client, auth_user):
+    """The public API must not accept arbitrary resolution or unbounded batches."""
+    bad_quality = await client.post(
+        "/api/clipper/process",
+        json={"url": "https://youtu.be/4Vz6L8B73i4", "output_quality": "2160"},
+        headers=auth_user["headers"],
+    )
+    bad_count = await client.post(
+        "/api/clipper/process",
+        json={"url": "https://youtu.be/4Vz6L8B73i4", "clip_count": 20},
+        headers=auth_user["headers"],
+    )
+    assert bad_quality.status_code == 422
+    assert bad_count.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_editor_rejects_invalid_source_type_and_timestamps(client, auth_user):
     invalid_type = await client.post(
         "/api/editor/process",
