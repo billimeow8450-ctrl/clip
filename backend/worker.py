@@ -234,6 +234,29 @@ def _parse_target_len(target_duration: Optional[str]) -> float:
     return value
 
 
+def _clipper_error_message(exc: Exception, source_url: Optional[str]) -> str:
+    """Return a safe, actionable user-facing failure for source ingestion.
+
+    The full provider exception remains in server logs for diagnosis. Exposing it
+    to the client would be both confusing and potentially reveal implementation
+    details, while a generic error made the landing-page button appear broken.
+    """
+    source = (source_url or "").lower()
+    detail = str(exc).lower()
+    is_external = source.startswith(("http://", "https://"))
+    if is_external and ("sign in to confirm" in detail or "bot" in detail or "youtube" in source):
+        return (
+            "This YouTube video cannot be downloaded automatically (YouTube blocked the server request). "
+            "Please upload the original MP4, MOV, or MKV file to create clips."
+        )
+    if is_external:
+        return (
+            "We could not retrieve that public video. Make sure it is public and playable, "
+            "or upload the original MP4, MOV, or MKV file instead."
+        )
+    return "We could not process this upload. Please try a valid MP4, MOV, or MKV video file."
+
+
 async def recover_stuck_jobs() -> int:
     """Requeue interrupted work; every execution still requires an atomic claim."""
     recovered = 0
@@ -498,7 +521,13 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
     except Exception as exc:
         _cleanup_workfile(input_file if 'input_file' in locals() else None)
         logger.exception("Clipper job failed")
-        await update_job_status(job_id, "failed", 100.0, "Failed", error_message="Processing failed. Please retry or contact support with the job ID.")
+        await update_job_status(
+            job_id,
+            "failed",
+            100.0,
+            "Failed",
+            error_message=_clipper_error_message(exc, params.get("url")),
+        )
 
 
 async def process_transcript_job(job_id: str, params: Dict[str, Any], user_id: int) -> None:

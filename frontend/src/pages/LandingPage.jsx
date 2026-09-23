@@ -161,8 +161,6 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
       return;
     }
 
-    triggerCelebration();
-
     // Authentication is required up front — the old auto-created guest
     // account with a hardcoded password was removed (finding C5).
     if (!api.auth.getCurrentUser()) {
@@ -186,8 +184,10 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
       const res = await api.clipper.process({
         url: finalUrl,
         title: title,
-        analysis_mode: 'deep',
-        target_duration: '60',
+        // The landing page should return a first playable clip quickly. The
+        // dedicated Clipper page still exposes longer/deeper processing.
+        analysis_mode: 'quick',
+        target_duration: '30',
       });
 
       startPolling({
@@ -296,6 +296,37 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
               <span className="w-2 h-2 rounded-full bg-[#0066ff] pulse-blue-dot"></span>
               <span>Free tier available — no credit card required</span>
             </div>
+          </div>
+
+          {/* Job feedback belongs next to the action that started it. Keeping it
+              below the marketing sections made a working job look like a dead
+              button and hid actionable failures from the user. */}
+          <div className="max-w-3xl mx-auto space-y-4 text-left" aria-live="polite">
+            {error && (
+              <div id="clipper-error" className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-medium animate-fadeIn" role="alert">
+                {error}
+              </div>
+            )}
+
+            {activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed' && (
+              <div className="p-6 rounded-2xl bg-white border border-blue-300 shadow-card animate-fadeIn" role="status">
+                <div className="flex items-center justify-between mb-3 gap-4">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
+                      <Loader2 className="w-4 h-4 text-[#0066ff] animate-spin" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-ink truncate">{activeJob.stage || 'Processing video...'}</h4>
+                      <p className="text-xs text-ink-muted">Creating real vertical clips from your source</p>
+                    </div>
+                  </div>
+                  <span className="text-sm font-mono font-bold text-blue-700 shrink-0">{activeJob.progress || 0}%</span>
+                </div>
+                <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden border border-line">
+                  <div className="h-full bg-gradient-to-r from-[#0066ff] to-[#0052cc] rounded-full transition-all duration-500 ease-out" style={{ width: `${activeJob.progress || 0}%` }} />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Trusted Creator Networks Bar */}
@@ -606,58 +637,6 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
           </div>
         </div>
       </section>
-
-      {/* Error message */}
-      {error && (
-        <div id="clipper-error" className="max-w-md mx-auto p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium animate-fadeIn" role="alert">
-          {error}
-        </div>
-      )}
-
-      {/* Live Progress Stages Tracker (hidden once the job reaches a terminal state) */}
-      {activeJob && activeJob.status !== 'completed' && activeJob.status !== 'failed' && (
-        <div className="max-w-3xl mx-auto p-6 rounded-2xl bg-white border border-blue-300 shadow-card animate-fadeIn text-left" role="status" aria-live="polite">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center">
-                <Loader2 className="w-4 h-4 text-[#0066ff] animate-spin" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-ink">
-                  {activeJob.stage || 'Processing Video...'}
-                </h4>
-                <p className="text-xs text-ink-muted">AI neural transcribing, speaker diarization & viral ranking</p>
-              </div>
-            </div>
-            <span className="text-sm font-mono font-bold text-blue-700">
-              {activeJob.progress || 25}%
-            </span>
-          </div>
-
-          <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden border border-line">
-            <div
-              className="h-full bg-gradient-to-r from-[#0066ff] to-[#0052cc] rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${activeJob.progress || 25}%` }}
-            />
-          </div>
-
-          {/* Progress Milestones Checklist */}
-          <div className="mt-4 pt-3 border-t border-line grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-medium">
-            <span className="flex items-center gap-1 text-blue-700">
-              <CheckCircle2 className="w-3.5 h-3.5 text-[#0066ff]" /> Speech-to-Text
-            </span>
-            <span className="flex items-center gap-1 text-blue-700">
-              <CheckCircle2 className="w-3.5 h-3.5 text-[#0066ff]" /> Kinetic Word Timing
-            </span>
-            <span className="flex items-center gap-1 text-blue-700">
-              <CheckCircle2 className="w-3.5 h-3.5 text-[#0066ff]" /> Virality Hook AI
-            </span>
-            <span className="flex items-center gap-1 text-blue-700">
-              <CheckCircle2 className="w-3.5 h-3.5 text-[#0066ff]" /> 9:16 Face Reframe
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* ===================== INTERACTIVE CLIPPING STUDIO SHOWCASE ===================== */}
       <section className="py-20 md:py-28 bg-white border-y border-line relative" id="studio">
