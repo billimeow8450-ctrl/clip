@@ -6,7 +6,7 @@ import {
   Captions, Sliders, Clock, Info
 } from 'lucide-react';
 import YoutubeIcon from '../components/common/YoutubeIcon';
-import { api } from '../api';
+import { api, resolveApiUrl } from '../api';
 import { useJobPolling } from '../hooks/useJobPolling';
 
 const sampleClips = [
@@ -135,7 +135,21 @@ export default function LandingPage({ setActiveTab, onOpenAuth }) {
   const handleJobFinished = (res) => {
     if (res.status === 'completed') {
       if (res.result_data?.clips && res.result_data.clips.length > 0) {
-        setClips(res.result_data.clips);
+        // The clipper API returns signed `video_url` paths. The marketing
+        // landing page uses the camelCase `videoUrl` field for its preview
+        // modal, so normalize real API results here instead of rendering an
+        // empty video element / "#" preview link.
+        setClips(res.result_data.clips.map((clip) => {
+          const mediaUrl = resolveApiUrl(clip.video_url);
+          return {
+            ...clip,
+            videoUrl: mediaUrl,
+            download_url: mediaUrl,
+            timecode: typeof clip.start_time === 'number' && typeof clip.end_time === 'number'
+              ? `${new Date(clip.start_time * 1000).toISOString().slice(14, 19)} - ${new Date(clip.end_time * 1000).toISOString().slice(14, 19)}`
+              : undefined,
+          };
+        }));
       }
       setSimNotice(Boolean(res.result_data?.is_simulation));
       triggerCelebration();
