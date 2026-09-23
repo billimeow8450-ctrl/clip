@@ -103,6 +103,9 @@ export default function ProjectsPage({ user, onRequireAuth }) {
             const isCompleted = job.status === 'completed';
             const isProcessing = job.status === 'processing' || job.status === 'queued';
             const isFailed = job.status === 'failed';
+            const generatedClips = Array.isArray(job.result_data?.clips)
+              ? job.result_data.clips.filter((clip) => clip?.video_url)
+              : [];
 
             return (
               <div key={job.id} className="card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-line hover:border-teal-400 transition-colors shadow-card">
@@ -153,12 +156,27 @@ export default function ProjectsPage({ user, onRequireAuth }) {
                           <Download className="w-3.5 h-3.5" />
                           <span>Download MP4</span>
                         </a>
+                      ) : generatedClips.length > 0 ? (
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {generatedClips.map((clip, index) => (
+                            <a
+                              key={clip.id || index}
+                              href={resolveApiUrl(clip.video_url)}
+                              download={`clip_${index + 1}.mp4`}
+                              className="btn-primary text-xs py-1.5 px-3 shadow-xs"
+                              title={clip.title || `Download clip ${index + 1}`}
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>MP4 {index + 1}</span>
+                            </a>
+                          ))}
+                        </div>
                       ) : (
                         <span
                           className="text-xs text-ink-dim font-mono"
-                          title="Simulation mode produces no downloadable file"
+                          title="This job did not produce a downloadable media file"
                         >
-                          No file (simulation)
+                          No downloadable file
                         </span>
                       )}
                     </div>
