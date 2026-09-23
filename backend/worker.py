@@ -59,6 +59,43 @@ def spawn_job(coro) -> None:
     task.add_done_callback(_BG_TASKS.discard)
 
 
+async def _download_youtube_with_broker(source_url: str, work_dir: Path, job_id: str) -> Path:
+    """Use the Telegram bot's multi-route YouTube transport for web jobs.
+
+    A single yt-dlp request is brittle from cloud IP addresses. The established
+    bot transport retries independent public clients, configured proxy/cookie
+    routes, and pytubefix before declaring a source unavailable.
+    """
+    from media_transport import BrokerConfig, FormatCandidate, MediaTransportBroker
+
+    proxy_values = os.getenv("YOUTUBE_PROXY_URLS", "")
+    proxies = [value.strip() for value in proxy_values.replace("\n", ",").split(",") if value.strip()]
+    cookie_path = Path(os.getenv("YOUTUBE_COOKIES_PATH", "/etc/secrets/youtube_cookies.txt"))
+
+    broker = MediaTransportBroker(
+        BrokerConfig(
+            download_dir=work_dir,
+            health_file=work_dir / "route-health.json",
+            force_ipv4=True,
+            concurrent_fragments=max(1, int(os.getenv("YTDLP_CONCURRENT_FRAGMENTS", "4"))),
+            http_chunk_size=max(0, int(os.getenv("YTDLP_HTTP_CHUNK_SIZE", str(5 * 1024 * 1024)))),
+            route_timeout_seconds=float(os.getenv("YOUTUBE_ROUTE_TIMEOUT_SECONDS", "900")),
+            pytubefix_enabled=True,
+        ),
+        cookie_getter=lambda: cookie_path if cookie_path.is_file() else None,
+        proxy_getter=lambda: proxies,
+    )
+    result = await broker.download_video(
+        source_url,
+        stem=f"source_{job_id}",
+        formats=(FormatCandidate("bestvideo[height<=480]+bestaudio/best[height<=480]/best", "mp4", True),),
+        target_height=480,
+        progress_cb=None,
+        cancel_event=None,
+    )
+    return result.path.resolve()
+
+
 async def update_job_status(
     job_id: str,
     status: str,
@@ -156,6 +193,8 @@ async def _resolve_input_file(source_url: Optional[str], job_id: str) -> Optiona
                     raise RuntimeError("No media file was downloaded")
                 return max(candidates, key=lambda p: p.stat().st_size)
 
+        if any(host in source_url.lower() for host in ("youtube.com", "youtu.be")):
+            return await _download_youtube_with_broker(source_url, work_dir, job_id)
         return await asyncio.to_thread(_download)
     if using_object_storage():
         work_dir = UPLOAD_DIR / ".work"
