@@ -394,7 +394,12 @@ async def process_editor_job(job_id: str, params: Dict[str, Any], user_id: int) 
                 # editor, silently ignoring the timeline.  The bot's range-first
                 # editor is the correct model: materialize a bounded source range,
                 # then run the production editor over that exact media.
-                input_file = await _resolve_input_file(source_url, job_id, youtube_height=1080)
+                # Use the same resilient source tier as the proven auto-clipper
+                # path.  Requesting a high-resolution YouTube stream first can
+                # spend many minutes cycling bot-challenged routes on cloud IPs;
+                # the production editor still produces its 1080x1920 delivery
+                # master, but fails fast only when no playable source exists.
+                input_file = await _resolve_input_file(source_url, job_id, youtube_height=480)
                 output_file = OUTPUT_DIR / f"edited_{job_id}.mp4"
 
                 if input_file and input_file.exists():
