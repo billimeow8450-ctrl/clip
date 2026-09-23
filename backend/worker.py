@@ -98,9 +98,10 @@ async def _download_youtube_with_broker(
             force_ipv4=True,
             concurrent_fragments=max(1, int(os.getenv("YTDLP_CONCURRENT_FRAGMENTS", "4"))),
             http_chunk_size=max(0, int(os.getenv("YTDLP_HTTP_CHUNK_SIZE", str(5 * 1024 * 1024)))),
-            # Match the bot's lower bound: a route must get enough time for a
-            # legitimate transfer, but it cannot hold a web job indefinitely.
-            route_timeout_seconds=max(180.0, float(os.getenv("YOUTUBE_ROUTE_TIMEOUT_SECONDS", "180"))),
+            # Keep the bot's 180s floor, while allowing a long public source to
+            # finish on a slow residential route.  The old 900s production
+            # ceiling remains the default rather than killing a real transfer.
+            route_timeout_seconds=max(180.0, float(os.getenv("YOUTUBE_ROUTE_TIMEOUT_SECONDS", "900"))),
             pytubefix_enabled=True,
         ),
         cookie_getter=lambda: cookie_path if cookie_path.is_file() else None,
