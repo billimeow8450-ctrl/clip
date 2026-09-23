@@ -11,7 +11,8 @@ import uuid
 import shutil
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
+from urllib.parse import quote, urlsplit
 
 # Add WEBSITE_DEVELOPER_SOURCE to sys.path so we can import master_engine, media_transport, etc.
 SOURCE_DIR = Path(__file__).resolve().parent.parent / "WEBSITE_DEVELOPER_SOURCE"
@@ -61,7 +62,12 @@ def spawn_job(coro) -> None:
 
 
 async def _download_youtube_with_broker(
-    source_url: str, work_dir: Path, job_id: str, *, target_height: int = 480
+    source_url: str,
+    work_dir: Path,
+    job_id: str,
+    *,
+    target_height: int = 480,
+    progress_cb: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Path:
     """Use the Telegram bot's multi-route YouTube transport for web jobs.
 
@@ -72,7 +78,17 @@ async def _download_youtube_with_broker(
     from media_transport import BrokerConfig, FormatCandidate, MediaTransportBroker
 
     proxy_values = os.getenv("YOUTUBE_PROXY_URLS", "")
-    proxies = [value.strip() for value in proxy_values.replace("\n", ",").split(",") if value.strip()]
+    proxies = []
+    for value in proxy_values.replace("\n", ",").split(","):
+        try:
+            normalized = _normalize_proxy_url(value)
+        except ValueError:
+            # Configuration errors must not leak credentials into logs or block
+            # the independent public/cookie routes.
+            logger.warning("Ignoring an invalid YouTube proxy configuration entry")
+            continue
+        if normalized:
+            proxies.append(normalized)
     cookie_path = Path(os.getenv("YOUTUBE_COOKIES_PATH", "/etc/secrets/youtube_cookies.txt"))
 
     broker = MediaTransportBroker(
@@ -82,7 +98,9 @@ async def _download_youtube_with_broker(
             force_ipv4=True,
             concurrent_fragments=max(1, int(os.getenv("YTDLP_CONCURRENT_FRAGMENTS", "4"))),
             http_chunk_size=max(0, int(os.getenv("YTDLP_HTTP_CHUNK_SIZE", str(5 * 1024 * 1024)))),
-            route_timeout_seconds=float(os.getenv("YOUTUBE_ROUTE_TIMEOUT_SECONDS", "900")),
+            # Match the bot's lower bound: a route must get enough time for a
+            # legitimate transfer, but it cannot hold a web job indefinitely.
+            route_timeout_seconds=max(180.0, float(os.getenv("YOUTUBE_ROUTE_TIMEOUT_SECONDS", "180"))),
             pytubefix_enabled=True,
         ),
         cookie_getter=lambda: cookie_path if cookie_path.is_file() else None,
@@ -97,10 +115,34 @@ async def _download_youtube_with_broker(
             True,
         ),),
         target_height=target_height,
-        progress_cb=None,
+        progress_cb=progress_cb,
         cancel_event=None,
     )
     return result.path.resolve()
+
+
+def _normalize_proxy_url(raw: str) -> Optional[str]:
+    """Accept the bot's host:port:user:password form without exposing secrets."""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if any(char.isspace() for char in value):
+        raise ValueError("Proxy contains whitespace")
+    if "://" not in value:
+        pieces = value.split(":")
+        if len(pieces) == 4:
+            host, port, username, password = pieces
+            if not port.isdigit():
+                raise ValueError("Proxy port is not numeric")
+            value = f"http://{quote(username, safe='')}:{quote(password, safe='')}@{host}:{port}"
+        else:
+            value = f"http://{value}"
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() not in {"http", "https", "socks4", "socks4a", "socks5", "socks5h"}:
+        raise ValueError("Unsupported proxy scheme")
+    if not parsed.hostname or parsed.port is None or not 1 <= parsed.port <= 65535:
+        raise ValueError("Invalid proxy host or port")
+    return value
 
 
 async def update_job_status(
@@ -152,7 +194,11 @@ async def claim_job(job_id: str) -> bool:
 
 
 async def _resolve_input_file(
-    source_url: Optional[str], job_id: str, *, youtube_height: int = 480
+    source_url: Optional[str],
+    job_id: str,
+    *,
+    youtube_height: int = 480,
+    progress_cb: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Optional[Path]:
     """Materialize an owned upload into an isolated short-lived work path."""
     upload_id = get_local_upload_id(source_url or "")
@@ -204,7 +250,7 @@ async def _resolve_input_file(
 
         if any(host in source_url.lower() for host in ("youtube.com", "youtu.be")):
             return await _download_youtube_with_broker(
-                source_url, work_dir, job_id, target_height=youtube_height
+                source_url, work_dir, job_id, target_height=youtube_height, progress_cb=progress_cb
             )
         return await asyncio.to_thread(_download)
     if using_object_storage():
@@ -553,7 +599,10 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
                 await update_job_status(job_id, "processing", 30.0, "Preparing fast source-based clip candidates...")
 
             await update_job_status(job_id, "processing", 55.0, "Downloading and preparing source video...")
-            input_file = await _resolve_input_file(url, job_id)
+            async def report_download_progress(message: str) -> None:
+                await update_job_status(job_id, "processing", 55.0, message)
+
+            input_file = await _resolve_input_file(url, job_id, progress_cb=report_download_progress)
             if not input_file or not input_file.exists():
                 raise RuntimeError("The source video could not be retrieved for clip rendering")
             source_duration = await asyncio.to_thread(_source_duration_seconds, input_file)

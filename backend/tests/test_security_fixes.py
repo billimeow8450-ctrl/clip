@@ -154,6 +154,17 @@ async def test_clipper_rejects_unsupported_render_options(client, auth_user):
     assert bad_count.status_code == 422
 
 
+def test_youtube_proxy_format_matches_bot_runtime_format():
+    """Render uses the same host:port:user:password convention as the bot."""
+    from backend.worker import _normalize_proxy_url
+
+    normalized = _normalize_proxy_url("proxy.example:443:user-name:pa$$word")
+    assert normalized == "http://user-name:pa%24%24word@proxy.example:443"
+    assert _normalize_proxy_url("") is None
+    with pytest.raises(ValueError):
+        _normalize_proxy_url("proxy.example:not-a-port:user:password")
+
+
 @pytest.mark.asyncio
 async def test_editor_rejects_invalid_source_type_and_timestamps(client, auth_user):
     invalid_type = await client.post(
