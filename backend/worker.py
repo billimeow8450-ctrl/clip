@@ -340,8 +340,11 @@ def _render_vertical_clip(
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}",
             "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
-            "-vf", f"scale={output_width}:{output_height}:force_original_aspect_ratio=increase,crop={output_width}:{output_height}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            # Lanczos preserves the detail available in the source.  This is
+            # deliberately paired with matching source ingestion below; it is
+            # not a fake "1080p" upscale of a 480p download.
+            "-vf", f"scale={output_width}:{output_height}:force_original_aspect_ratio=increase:flags=lanczos,crop={output_width}:{output_height}",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart", str(destination),
         ],
@@ -651,7 +654,15 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
             async def report_download_progress(message: str) -> None:
                 await update_job_status(job_id, "processing", 55.0, message)
 
-            input_file = await _resolve_input_file(url, job_id, progress_cb=report_download_progress)
+            # Match the delivery resolution at ingestion time.  The former
+            # default (480p) was then enlarged to 1080x1920, producing visibly
+            # soft clips while the UI claimed a 1080p result.
+            input_file = await _resolve_input_file(
+                url,
+                job_id,
+                youtube_height=output_width,
+                progress_cb=report_download_progress,
+            )
             if not input_file or not input_file.exists():
                 raise RuntimeError("The source video could not be retrieved for clip rendering")
             source_duration = await asyncio.to_thread(_source_duration_seconds, input_file)
