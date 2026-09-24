@@ -668,33 +668,48 @@ async def process_clipper_job(job_id: str, params: Dict[str, Any], user_id: int)
             source_duration = await asyncio.to_thread(_source_duration_seconds, input_file)
             target_len = _resolve_target_len(target_duration, source_duration)
 
-            # Public comment data is not reliably available for every video. In that
-            # case create real, evenly distributed excerpts and say so plainly rather
-            # than fabricating retention scores or placeholder URLs.
+            # The old web fallback made evenly-spaced excerpts.  That is not viral
+            # selection and is how credits/character names reached users.  Reuse
+            # the bot's local transcript + semantic/audio/visual ranking path.
             if not clips:
-                max_start = max(0.0, source_duration - min(target_len, source_duration))
-                if max_start == 0:
-                    starts = [0.0]
-                else:
-                    starts = [round(max_start * index / max(clip_count - 1, 1), 1) for index in range(clip_count)]
+                if source_duration < max(20.0, target_len):
+                    raise RuntimeError(
+                        f"This source is only {source_duration:.0f}s long and cannot produce {clip_count} meaningful clips."
+                    )
+                await update_job_status(job_id, "processing", 62.0, "Transcribing and ranking meaningful viral moments...")
+                from master_engine.config import Settings
+                from master_engine.media import probe
+                from master_engine.transcribe import transcribe
+                from .viral_selection import choose_candidates, paragraphs_from_words
+
+                media = await asyncio.to_thread(probe, input_file)
+                transcript = await asyncio.to_thread(transcribe, media, Settings.from_env())
+                paragraphs = paragraphs_from_words(transcript.words)
+                ranked = await asyncio.to_thread(
+                    choose_candidates, input_file, paragraphs, source_duration, clip_count, int(target_len)
+                )
+                if not ranked:
+                    raise RuntimeError("No meaningful spoken moments were found in this source.")
                 clips = [
                     {
                         "id": f"clip_{uuid.uuid4().hex[:8]}",
-                        "title": f"Video Segment #{index + 1}",
-                        "start_time": start,
-                        "viral_score": None,
-                        "hook_text": "Real source excerpt; audience metrics were unavailable for this video.",
+                        "title": candidate.hook,
+                        "start_time": candidate.start,
+                        "end_time": candidate.end,
+                        "viral_score": candidate.score,
+                        "hook_text": candidate.reason,
                         "thumbnail_url": params.get("thumbnail_url") or FALLBACK_THUMBNAIL,
                         "is_sample": False,
                     }
-                    for index, start in enumerate(dict.fromkeys(starts))
+                    for candidate in ranked
                 ]
 
             await update_job_status(job_id, "processing", 75.0, "Rendering vertical 9:16 clips...")
             rendered_clips = []
             for index, clip in enumerate(clips, start=1):
                 start = min(max(0.0, float(clip["start_time"])), max(0.0, source_duration - 0.1))
-                duration = min(target_len, source_duration - start)
+                requested_end = float(clip.get("end_time") or (start + target_len))
+                duration = min(max(0.0, requested_end - start), source_duration - start)
                 if duration < 0.5:
                     continue
                 filename = f"clip_{job_id}_{index}.mp4"
