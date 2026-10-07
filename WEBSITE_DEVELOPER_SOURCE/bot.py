@@ -14075,7 +14075,7 @@ def quality_menu(
             else "size unavailable"
         )
         warning = (
-            " - over 2 GB"
+            " - sent in parts automatically"
             if choice.estimated_size is not None
             and choice.estimated_size > TELEGRAM_MAX_BYTES
             else ""
@@ -14235,6 +14235,62 @@ async def send_video_with_fallback(
                 caption,
             )
             return "document"
+
+
+def split_video_for_telegram(path: Path, max_bytes: int, cancel_event: threading.Event) -> Tuple[List[Path], Optional[Path]]:
+    """Cut an oversized video at keyframes without changing its quality."""
+    if path.stat().st_size <= max_bytes:
+        return [path], None
+    duration = float(probe_media(path).get("duration") or 0)
+    if duration <= 0:
+        raise RuntimeError("Cannot split this video because its duration is unknown")
+    output_dir = Path(tempfile.mkdtemp(prefix="telegram_parts_", dir=path.parent))
+    suffix = path.suffix.lower() if path.suffix.lower() in {".mp4", ".mkv", ".webm"} else ".mkv"
+    segment_seconds = max(1, int(duration * max_bytes * 0.75 / path.stat().st_size))
+    try:
+        for attempt in range(10):
+            ensure_not_cancelled(cancel_event)
+            for part in output_dir.glob("part_*" + suffix):
+                part.unlink()
+            log_path = output_dir / "ffmpeg.log"
+            command = [
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(path), "-map", "0:v:0", "-map", "0:a?",
+                "-c", "copy", "-f", "segment", "-segment_time", str(segment_seconds),
+                "-reset_timestamps", "1", str(output_dir / ("part_%03d" + suffix)),
+            ]
+            with log_path.open("wb") as log_file:
+                process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=log_file)
+                try:
+                    while process.poll() is None:
+                        if cancel_event.wait(0.25):
+                            process.terminate()
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait()
+                            raise JobCancelled("Task stopped by the user")
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+            if process.returncode:
+                raise RuntimeError("Video split failed: " + log_path.read_text(errors="replace")[-500:])
+            parts = sorted(output_dir.glob("part_*" + suffix))
+            if len(parts) > 1 and all(0 < part.stat().st_size <= max_bytes for part in parts):
+                log_path.unlink(missing_ok=True)
+                return parts, output_dir
+            segment_seconds //= 2
+            if segment_seconds < 1:
+                break
+        raise RuntimeError("Could not make playable parts under Telegram's file limit")
+    except Exception:
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise
+
+
+
 
 
 def triple_quality_check(
@@ -19500,6 +19556,7 @@ async def handle_youtube_callback(
     await query.answer()
 
     file_path: Optional[Path] = None
+    split_dir: Optional[Path] = None
 
     async def progress(message: str) -> None:
         active_jobs.update(key, stage=message)
@@ -19553,14 +19610,6 @@ async def handle_youtube_callback(
                 query.message, "This quality is no longer available."
             )
             return
-        estimate = choice.get("estimated_size")
-        if estimate is not None and int(estimate) > TELEGRAM_MAX_BYTES:
-            await safe_edit_message(
-                query.message,
-                "The estimated file is over Telegram's 2 GB limit. "
-                "Choose a lower quality.",
-            )
-            return
 
         await progress(f"Your {label} download is queued...")
         file_path, error = await download_video(
@@ -19573,25 +19622,27 @@ async def handle_youtube_callback(
             )
             return
         if file_path.stat().st_size > TELEGRAM_MAX_BYTES:
-            await safe_edit_message(
-                query.message,
-                "The final file is over Telegram's 2 GB limit.",
-            )
-            return
-
-        await progress(f"Sending {label}...")
-        ensure_not_cancelled(cancel_event)
-        delivery = await send_video_with_fallback(
-            context,
-            chat.id,
-            file_path,
-            f"{label}\n{owner_footer()}",
-            optional_int(job.get("duration")),
-            optional_int(choice.get("width")),
-            optional_int(choice.get("height")),
+            await progress(f"Splitting {label} into playable parts without re-encoding...")
+        video_parts, split_dir = await asyncio.to_thread(
+            split_video_for_telegram, file_path, TELEGRAM_MAX_BYTES, cancel_event
         )
+        total_parts = len(video_parts)
+        for index, part in enumerate(video_parts, start=1):
+            ensure_not_cancelled(cancel_event)
+            part_label = f"{label} - Part {index}/{total_parts}" if total_parts > 1 else label
+            await progress(f"Sending {part_label}...")
+            await send_video_with_fallback(
+                context,
+                chat.id,
+                part,
+                f"{part_label}\n{owner_footer()}",
+                optional_int(job.get("duration")) if total_parts == 1 else None,
+                optional_int(choice.get("width")),
+                optional_int(choice.get("height")),
+            )
         await safe_edit_message(
-            query.message, f"Done. Sent as a {delivery}."
+            query.message,
+            f"Done. Sent {total_parts} playable parts." if total_parts > 1 else "Done. Video sent.",
         )
     except JobCancelled:
         await safe_edit_message(query.message, "Task stopped successfully.")
@@ -19610,7 +19661,7 @@ async def handle_youtube_callback(
         )
     finally:
         active_jobs.finish(user.id, key)
-        await cleanup_manager.schedule([file_path])
+        await cleanup_manager.schedule([file_path, split_dir])
 
 
 def generate_editor_hook(text_value: str) -> str:
