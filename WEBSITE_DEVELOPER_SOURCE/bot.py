@@ -116,7 +116,7 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is missing")
 
 LOCAL_BOT_API_URL = os.getenv(
-    "LOCAL_BOT_API_URL", "http://127.0.0.1:8081"
+    "LOCAL_BOT_API_URL", "https://api.telegram.org"
 ).rstrip("/")
 
 OWNER_ID = int(os.getenv("OWNER_ID", "1724773970"))
@@ -21231,7 +21231,7 @@ def build_application() -> Application:
         .token(BOT_TOKEN)
         .base_url(f"{LOCAL_BOT_API_URL}/bot")
         .base_file_url(f"{LOCAL_BOT_API_URL}/file/bot")
-        .local_mode(True)
+        .local_mode(LOCAL_BOT_API_URL != "https://api.telegram.org")
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .concurrent_updates(64)
