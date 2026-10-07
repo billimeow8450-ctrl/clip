@@ -10836,72 +10836,34 @@ def build_quality_choices(
         if not exact:
             continue
 
-        selected: List[Dict[str, Any]]
-        selector: str
-        playable = False
-        container = "mkv"
+        available = [
+            fmt for fmt in exact
+            if "premium" not in str(fmt.get("format_note") or "").lower()
+        ] or exact
 
-        progressive = [
-            fmt
-            for fmt in exact
-            if fmt.get("acodec") not in (None, "none")
-            and is_h264(fmt)
-            and is_aac(fmt)
-            and str(fmt.get("ext") or "").lower() == "mp4"
-        ]
-
-        if progressive:
-            video = best_video_within_telegram_limit(progressive, duration)
+        # Choose the strongest source stream at the requested resolution.
+        video = best_video_within_telegram_limit(available, duration)
+        if video.get("acodec") not in (None, "none"):
             selected = [video]
             selector = str(video["format_id"])
-            playable = True
-            container = "mp4"
+            playable = (
+                is_h264(video)
+                and is_aac(video)
+                and str(video.get("ext") or "").lower() == "mp4"
+            )
+            container = "mp4" if playable else "mkv"
         else:
-            h264_only = [
-                fmt
-                for fmt in exact
-                if fmt.get("acodec") == "none"
-                and is_h264(fmt)
-                and str(fmt.get("ext") or "").lower() == "mp4"
-            ]
-            if h264_only and best_audio_aac:
-                video = best_video_within_telegram_limit(
-                    h264_only, duration, best_audio_aac
-                )
-                selected = [video, best_audio_aac]
-                selector = (
-                    f"{video['format_id']}+{best_audio_aac['format_id']}"
-                )
-                playable = True
-                container = "mp4"
-            else:
-                progressive_any = [
-                    fmt
-                    for fmt in exact
-                    if fmt.get("acodec") not in (None, "none")
-                ]
-                if progressive_any:
-                    video = best_video_within_telegram_limit(
-                        progressive_any, duration
-                    )
-                    selected = [video]
-                    selector = str(video["format_id"])
-                    container = str(video.get("ext") or "mkv").lower()
-                    if container not in {"mp4", "mkv", "webm"}:
-                        container = "mkv"
-                else:
-                    video_only = [
-                        fmt for fmt in exact if fmt.get("acodec") == "none"
-                    ]
-                    if not video_only or not best_audio_any:
-                        continue
-                    video = best_video_within_telegram_limit(
-                        video_only, duration, best_audio_any
-                    )
-                    selected = [video, best_audio_any]
-                    selector = (
-                        f"{video['format_id']}+{best_audio_any['format_id']}"
-                    )
+            if not best_audio_any:
+                continue
+            selected = [video, best_audio_any]
+            selector = f"{video['format_id']}+{best_audio_any['format_id']}"
+            playable = (
+                is_h264(video)
+                and is_aac(best_audio_any)
+                and str(video.get("ext") or "").lower() == "mp4"
+                and str(best_audio_any.get("ext") or "").lower() in {"m4a", "mp4"}
+            )
+            container = "mp4" if playable else "mkv"
 
         size, approximate = estimate_selected_size(selected, duration)
         choices[label] = QualityChoice(
