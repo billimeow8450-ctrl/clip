@@ -55,8 +55,8 @@ def main():
         # Telegram requires logOut before a bot can reliably receive updates locally.
         try:
             result = request_json(f"https://api.telegram.org/bot{token}/logOut")
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise RuntimeError("Could not deregister the bot from Telegram's hosted API") from exc
+        except (urllib.error.URLError, TimeoutError):
+            raise RuntimeError("Could not deregister the bot from Telegram's hosted API") from None
         if not result.get("ok"):
             raise RuntimeError("Telegram's hosted API rejected logOut")
         migration_marker.touch()
