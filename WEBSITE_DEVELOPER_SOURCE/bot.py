@@ -10615,7 +10615,19 @@ def estimate_selected_size(
             return None, True
         sizes.append(size)
         approximate = approximate or approx
-    return int(sum(sizes) * 1.03), True if len(selected) > 1 else approximate
+    return int(sum(sizes) * 1.03), True if len(selected) > 1 else approximatedef best_video_within_telegram_limit(
+    candidates: List[Dict[str, Any]],
+    duration: float,
+    audio: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Keep the highest quality format whose complete file can be sent."""
+    fitting = []
+    for fmt in candidates:
+        parts = [fmt, audio] if audio else [fmt]
+        size, _ = estimate_selected_size(parts, duration)
+        if size is not None and size <= TELEGRAM_MAX_BYTES:
+            fitting.append(fmt)
+    return max(fitting or candidates, key=video_score)
 
 
 def ydl_base_options(
@@ -10842,7 +10854,7 @@ def build_quality_choices(
         ]
 
         if progressive:
-            video = max(progressive, key=video_score)
+            video = best_video_within_telegram_limit(progressive, duration)
             selected = [video]
             selector = str(video["format_id"])
             playable = True
@@ -10856,7 +10868,9 @@ def build_quality_choices(
                 and str(fmt.get("ext") or "").lower() == "mp4"
             ]
             if h264_only and best_audio_aac:
-                video = max(h264_only, key=video_score)
+                video = best_video_within_telegram_limit(
+                    h264_only, duration, best_audio_aac
+                )
                 selected = [video, best_audio_aac]
                 selector = (
                     f"{video['format_id']}+{best_audio_aac['format_id']}"
@@ -10870,7 +10884,9 @@ def build_quality_choices(
                     if fmt.get("acodec") not in (None, "none")
                 ]
                 if progressive_any:
-                    video = max(progressive_any, key=video_score)
+                    video = best_video_within_telegram_limit(
+                        progressive_any, duration
+                    )
                     selected = [video]
                     selector = str(video["format_id"])
                     container = str(video.get("ext") or "mkv").lower()
@@ -10882,7 +10898,9 @@ def build_quality_choices(
                     ]
                     if not video_only or not best_audio_any:
                         continue
-                    video = max(video_only, key=video_score)
+                    video = best_video_within_telegram_limit(
+                        video_only, duration, best_audio_any
+                    )
                     selected = [video, best_audio_any]
                     selector = (
                         f"{video['format_id']}+{best_audio_any['format_id']}"
