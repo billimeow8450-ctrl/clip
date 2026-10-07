@@ -1,22 +1,27 @@
+FROM denoland/deno:bin-2.9.4 AS deno
+
+FROM node:26-bookworm-slim AS bgutil-builder
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN git clone --branch 2.0.0 --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /src/bgutil
+WORKDIR /src/bgutil/server
+RUN npm ci && npx tsc
+
 FROM debian:bookworm-slim AS telegram-builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends     build-essential ca-certificates cmake git gperf libssl-dev zlib1g-dev     && rm -rf /var/lib/apt/lists/*
-
-RUN git clone --recursive --depth 1 https://github.com/tdlib/telegram-bot-api.git /src/telegram-bot-api     && cmake -S /src/telegram-bot-api -B /src/telegram-bot-api/build        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/telegram     && cmake --build /src/telegram-bot-api/build --target install -j 2
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git gperf libssl-dev zlib1g-dev && rm -rf /var/lib/apt/lists/*
+RUN git clone --recursive --depth 1 https://github.com/tdlib/telegram-bot-api.git /src/telegram-bot-api && cmake -S /src/telegram-bot-api -B /src/telegram-bot-api/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/telegram && cmake --build /src/telegram-bot-api/build --target install -j 2
 
 FROM python:3.11-slim-bookworm
-
-ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     PIP_NO_CACHE_DIR=1     LOCAL_BOT_API_URL=http://127.0.0.1:8081
-
-RUN apt-get update && apt-get install -y --no-install-recommends     ffmpeg fonts-dejavu-core libglib2.0-0 libssl3 zlib1g     && rm -rf /var/lib/apt/lists/*
-
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 LOCAL_BOT_API_URL=http://127.0.0.1:8081
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core libglib2.0-0 libssl3 zlib1g && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=telegram-builder /opt/telegram/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
+COPY --from=deno /deno /usr/local/bin/deno
+COPY --from=bgutil-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=bgutil-builder /src/bgutil/server /opt/bgutil/server
 COPY WEBSITE_DEVELOPER_SOURCE/requirements.txt /tmp/bot-requirements.txt
-RUN pip install -r /tmp/bot-requirements.txt
+RUN pip install -r /tmp/bot-requirements.txt && pip install 'yt-dlp[default]>=2026.8.19' 'bgutil-ytdlp-pot-provider==2.0.0'
 COPY WEBSITE_DEVELOPER_SOURCE/ /app/WEBSITE_DEVELOPER_SOURCE/
 COPY render_bot.py /app/render_bot.py
-RUN useradd --create-home --uid 10001 appuser     && mkdir -p /app/state /app/tmp/telegram-files /app/tmp/telegram-temp     && chown -R appuser:appuser /app
-
+RUN useradd --create-home --uid 10001 appuser && mkdir -p /app/state /app/tmp/telegram-files /app/tmp/telegram-temp && chown -R appuser:appuser /app
 USER appuser
 CMD ["python", "/app/render_bot.py"]
