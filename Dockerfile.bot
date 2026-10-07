@@ -1,0 +1,22 @@
+FROM debian:bookworm-slim AS telegram-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends     build-essential ca-certificates cmake git gperf libssl-dev zlib1g-dev     && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --recursive --depth 1 https://github.com/tdlib/telegram-bot-api.git /src/telegram-bot-api     && cmake -S /src/telegram-bot-api -B /src/telegram-bot-api/build        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/telegram     && cmake --build /src/telegram-bot-api/build --target install -j 2
+
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     PIP_NO_CACHE_DIR=1     LOCAL_BOT_API_URL=http://127.0.0.1:8081
+
+RUN apt-get update && apt-get install -y --no-install-recommends     ffmpeg fonts-dejavu-core libglib2.0-0 libssl3 zlib1g     && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=telegram-builder /opt/telegram/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
+COPY WEBSITE_DEVELOPER_SOURCE/requirements.txt /tmp/bot-requirements.txt
+RUN pip install -r /tmp/bot-requirements.txt
+COPY WEBSITE_DEVELOPER_SOURCE/ /app/WEBSITE_DEVELOPER_SOURCE/
+COPY render_bot.py /app/render_bot.py
+RUN useradd --create-home --uid 10001 appuser     && mkdir -p /app/state /app/tmp/telegram-files /app/tmp/telegram-temp     && chown -R appuser:appuser /app
+
+USER appuser
+CMD ["python", "/app/render_bot.py"]
