@@ -14,6 +14,7 @@ APP = Path("/app")
 STATE = APP / "state"
 BOT_DIR = APP / "WEBSITE_DEVELOPER_SOURCE"
 API_URL = "http://127.0.0.1:8081"
+BGUTIL_URL = "http://127.0.0.1:4416"
 children = []
 
 
@@ -43,6 +44,23 @@ def main():
 
     for path in (STATE / "auth", STATE / "telegram", APP / "tmp/telegram-files", APP / "tmp/telegram-temp"):
         path.mkdir(parents=True, exist_ok=True)
+
+    bgutil = subprocess.Popen(
+        ["node", "/opt/bgutil/server/build/main.js", "--host", "127.0.0.1"],
+        cwd="/opt/bgutil/server",
+    )
+    children.append(bgutil)
+    for _ in range(30):
+        if bgutil.poll() is not None:
+            raise RuntimeError("BgUtil PO token server exited during startup")
+        try:
+            if request_json(f"{BGUTIL_URL}/ping", timeout=2).get("version") == "2.0.0":
+                break
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            pass
+        time.sleep(1)
+    else:
+        raise RuntimeError("BgUtil PO token server did not become ready")
 
     auth = BOT_DIR / "auth"
     if not auth.is_symlink() and not auth.exists():
@@ -85,8 +103,10 @@ def main():
     print("Telegram local Bot API ready; starting bot", flush=True)
     bot = subprocess.Popen([sys.executable, str(BOT_DIR / "bot.py")], cwd=BOT_DIR)
     children.append(bot)
-    while api.poll() is None and bot.poll() is None:
+    while api.poll() is None and bgutil.poll() is None and bot.poll() is None:
         time.sleep(2)
+    if bgutil.poll() is not None:
+        raise RuntimeError("BgUtil PO token server stopped")
     if api.poll() is not None:
         raise RuntimeError("Telegram local Bot API server stopped")
     return bot.returncode
