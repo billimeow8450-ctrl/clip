@@ -10615,7 +10615,10 @@ def estimate_selected_size(
             return None, True
         sizes.append(size)
         approximate = approximate or approx
-    return int(sum(sizes) * 1.03), True if len(selected) > 1 else approximatedef best_video_within_telegram_limit(
+    return int(sum(sizes) * 1.03), True if len(selected) > 1 else approximate
+
+
+def best_video_within_telegram_limit(
     candidates: List[Dict[str, Any]],
     duration: float,
     audio: Optional[Dict[str, Any]] = None,
