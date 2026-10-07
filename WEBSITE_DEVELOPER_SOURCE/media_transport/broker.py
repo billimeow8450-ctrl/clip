@@ -206,7 +206,7 @@ class MediaTransportBroker:
                 formats = info.get("formats") or []
                 if not any(isinstance(item, dict) and item.get("vcodec") not in (None, "none") for item in formats):
                     raise MediaTransportError(
-                        "YouTube returned no downloadable video formats",
+                        ("YouTube blocked this server's network (HTTP 429 / sign-in challenge)" if ("http error 429" in output.lower() or "sign in to confirm" in output.lower()) else "YouTube returned no downloadable video formats"),
                         kind=ErrorKind.FORMAT,
                         route=route.name,
                     )
@@ -1120,6 +1120,17 @@ class MediaTransportBroker:
     def _final_error(self, title: str, failures: Sequence[str]) -> str:
         if not failures:
             return title
+        if any(
+            "YouTube blocked this server's network" in item
+            or "http error 429" in item.lower()
+            or "sign in to confirm you're not a bot" in item.lower()
+            for item in failures
+        ):
+            return (
+                "YouTube is blocking this bot's server. Ask the admin to add a working "
+                "YouTube proxy with /addproxies, or upload the video file directly."
+            )
+
         # Keep the user-facing error concise; detailed route health persists in JSON/logs.
         tail = list(failures)[-3:]
         return title + ". Last routes: " + " | ".join(item[:260] for item in tail)
