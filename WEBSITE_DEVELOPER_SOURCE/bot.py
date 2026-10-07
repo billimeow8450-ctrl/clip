@@ -11027,14 +11027,14 @@ def format_fallbacks(
             False,
         ),
         (
-            f"bestvideo[height<={height}][ext=mp4][vcodec^=avc1]"
-            f"+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]",
+            f"bestvideo[height={height}][ext=mp4][vcodec^=avc1]"
+            f"+bestaudio[ext=m4a]/best[height={height}][ext=mp4]",
             "mp4",
             True,
         ),
         (
-            f"bestvideo[height<={height}]+bestaudio/"
-            f"best[height<={height}]/best",
+            f"bestvideo[height={height}]+bestaudio/"
+            f"best[height={height}]",
             "mkv",
             False,
         ),
@@ -11083,6 +11083,15 @@ async def download_video(
                 cancel_event=cancel_event,
             )
             ensure_not_cancelled(cancel_event)
+            requested_height = int(choice.get("height") or 0)
+            actual_height = int(result.probe.height if result.probe else 0)
+            if requested_height and abs(actual_height - requested_height) > 8:
+                result.path.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"Requested {requested_height}p, but YouTube delivered "
+                    f"{actual_height or 'unknown'}p. Nothing was sent; "
+                    "please retry or choose a quality YouTube makes available."
+                )
             suffix = result.path.suffix.lower()
             choice["telegram_video"] = suffix == ".mp4"
             choice["output_container"] = suffix.lstrip(".") or result.output_container or "mp4"
