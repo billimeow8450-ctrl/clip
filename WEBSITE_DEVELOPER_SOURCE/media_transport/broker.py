@@ -147,6 +147,7 @@ class MediaTransportBroker:
                     use_cookies=True,
                 )
             )
+        routes.sort(key=lambda route: 0 if route.proxy else 1)
         return routes
 
     def _cookie_file(self) -> Optional[Path]:
