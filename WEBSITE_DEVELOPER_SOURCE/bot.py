@@ -10623,14 +10623,8 @@ def best_video_within_telegram_limit(
     duration: float,
     audio: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Keep the highest quality format whose complete file can be sent."""
-    fitting = []
-    for fmt in candidates:
-        parts = [fmt, audio] if audio else [fmt]
-        size, _ = estimate_selected_size(parts, duration)
-        if size is not None and size <= TELEGRAM_MAX_BYTES:
-            fitting.append(fmt)
-    return max(fitting or candidates, key=video_score)
+    """Choose the best stream; oversized results are split during delivery."""
+    return max(candidates, key=video_score)
 
 
 def ydl_base_options(
