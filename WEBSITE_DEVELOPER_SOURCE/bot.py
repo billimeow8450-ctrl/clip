@@ -2259,7 +2259,7 @@ def generate_local_hook(text_value: str) -> str:
     )
     candidate = candidate.strip(" .!?")
     if not candidate:
-        return "You need to hear this"
+        return ""
     if len(candidate) > 82:
         candidate = candidate[:79].rsplit(" ", 1)[0] + "..."
     return candidate
@@ -2855,7 +2855,7 @@ def fallback_detect_viral_segments(
     enriched: List[ViralSegment] = []
 
     # Audio analysis is only applied to the strongest text candidates.
-    for score, start, end, text_value, reasons in candidates[:max(15, limit * 3)]:
+    for score, start, end, text_value, reasons in candidates[:min(40, max(15, limit * 2))]:
         ensure_not_cancelled(cancel_event)
         final_score, pro_reason = pro_viral_potential_score(
             text_value,
@@ -2906,11 +2906,12 @@ def detect_viral_segments(
     if video_duration <= 0 and paragraphs:
         video_duration = max(p.end for p in paragraphs)
 
+    candidate_limit = max(20, limit * 2)
     segments = detect_viral_segments_with_llm(
         paragraphs,
         video_duration,
         cancel_event,
-        limit,
+        candidate_limit,
     )
 
     # LLM selection is useful for semantics, but the displayed viral score is
@@ -2936,20 +2937,20 @@ def detect_viral_segments(
             )
 
     if len(segments) >= max(1, min(3, limit)):
-        return segments[:limit]
+        return segments[:candidate_limit]
 
     fallback = fallback_detect_viral_segments(
         paragraphs,
         source_path,
         video_duration,
         cancel_event,
-        limit,
+        candidate_limit,
         channel_profile,
     )
 
     combined = _dedupe_viral_segments(
         segments + fallback,
-        limit,
+        candidate_limit,
     )
     return combined
 
@@ -3069,7 +3070,7 @@ def expand_segment_to_duration(
             penalty = (
                 abs(duration - natural_target) * 0.16
                 + abs(((start_value + end_value) / 2.0) - core_mid) * 0.06
-                + max(0.0, context_before - 14.0) * 0.48
+                + max(0.0, context_before - 6.0) * 1.10
                 + max(0.0, context_after - 24.0) * 0.18
             )
             candidates.append((penalty, start_value, end_value))
@@ -3127,6 +3128,30 @@ def _planned_clip_is_duplicate(
     return False
 
 
+def _clip_range_editorial_score(
+    segment: ViralSegment,
+    paragraphs: List["TranscriptParagraph"],
+    start: float,
+    end: float,
+) -> float:
+    """Rank the actual edit, including its opening and final sentence."""
+    score = float(segment.score)
+    lead_in = max(0.0, float(segment.start) - start)
+    score -= min(18.0, max(0.0, lead_in - 5.0) * 1.5)
+
+    opening = _segment_text(paragraphs, start, min(end, start + 5.0)).strip()
+    ending = _segment_text(paragraphs, max(start, end - 5.0), end).strip()
+    if not opening or len(opening.split()) < 4:
+        score -= 9.0
+    elif re.match(r"(?i)^(?:and|but|so|um|uh|okay|you know)\b", opening):
+        score -= 5.0
+    if not ending:
+        score -= 9.0
+    elif re.search(r"(?i)\b(?:and|but|because|if|so|then|that)$", ending.rstrip(" .!?")):
+        score -= 7.0
+    return score
+
+
 def _deep_expand_from_hook(
     segment: ViralSegment,
     paragraphs: List["TranscriptParagraph"],
@@ -3182,12 +3207,8 @@ def plan_unique_auto_clips(
         if target_seconds is None:
             continue
 
-        existing_ranges: List[Tuple[float, float]] = []
-        for segment in sorted(
-            segments,
-            key=lambda item: item.score,
-            reverse=True,
-        ):
+        candidates: List[Tuple[float, ViralSegment, float, float, str]] = []
+        for segment in segments:
             start_value, end_value, clip_text = expand_segment_to_duration(
                 segment,
                 paragraphs,
@@ -3196,6 +3217,16 @@ def plan_unique_auto_clips(
             )
             if end_value <= start_value:
                 continue
+
+            candidates.append((
+                _clip_range_editorial_score(segment, paragraphs, start_value, end_value),
+                segment, start_value, end_value, clip_text,
+            ))
+
+        existing_ranges: List[Tuple[float, float]] = []
+        for _, segment, start_value, end_value, clip_text in sorted(
+            candidates, key=lambda item: item[0], reverse=True,
+        ):
             if _planned_clip_is_duplicate(
                 start_value,
                 end_value,
@@ -3214,7 +3245,13 @@ def plan_unique_auto_clips(
                 )
             )
 
-    return plan
+    return sorted(
+        plan,
+        key=lambda item: _clip_range_editorial_score(
+            item[0], paragraphs, item[2], item[3]
+        ),
+        reverse=True,
+    )
 
 
 def normalize_quality_choice(
@@ -6375,39 +6412,43 @@ def generate_hook_overlay(
     font_candidates = [
         "/usr/share/fonts/truetype/lato/Lato-Heavy.ttf",
         "/usr/share/fonts/truetype/lato/Lato-Black.ttf",
+        str(BASE_DIR / "master_engine/assets/fonts/ttf/Montserrat-ExtraBold.ttf"),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
     ]
-    font = None
-    for candidate in font_candidates:
-        if Path(candidate).exists():
-            font = ImageFont.truetype(candidate, 62)
-            break
-    if font is None:
-        font = ImageFont.load_default()
-
     hook_text = _clipper_clean_text(hook_text, 64)
     hook_text = _censor_risky_text(hook_text)
     hook_text = re.sub(r"(?:^|\s)(?:>>+|O+H+|UH+|UM+|OKAY|OK)(?:\s|$)", " ", hook_text, flags=re.I)
     hook_text = re.sub(r"\s+", " ", hook_text).strip(" -–—:,.!? ").upper()
     hook_text = " ".join(hook_text.split()[:10])
     words = hook_text.split()
+    font_path = next((p for p in font_candidates if Path(p).exists()), None)
     lines: List[str] = []
-    current = ""
+    font = ImageFont.load_default()
+    font_size = 62
+    # Fit the entire hook into the card. The previous two-line slice silently
+    # dropped the payoff when a headline wrapped onto a third line.
+    for font_size in range(62, 35, -2):
+        font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+        trial_lines: List[str] = []
+        current = ""
+        for word in words:
+            trial = f"{current} {word}".strip()
+            bbox = draw.textbbox((0, 0), trial, font=font)
+            if bbox[2] - bbox[0] <= 900 or not current:
+                current = trial
+            else:
+                trial_lines.append(current)
+                current = word
+        if current:
+            trial_lines.append(current)
+        lines = trial_lines
+        if len(lines) <= 2 and all(
+            draw.textbbox((0, 0), line, font=font)[2] <= 900 for line in lines
+        ):
+            break
 
-    for word in words:
-        trial = f"{current} {word}".strip()
-        bbox = draw.textbbox((0, 0), trial, font=font)
-        if bbox[2] - bbox[0] <= 900 or not current:
-            current = trial
-        else:
-            lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    lines = lines[:2]
-
-    line_height = 72
+    line_height = font_size + 10
     box_height = max(132, len(lines) * line_height + 46)
     left = 70
     right = width - 70
@@ -7096,18 +7137,59 @@ def generate_animated_captions(
     events: List[str] = []
     primary = template["primary"]
     group_size = max(2, min(3, int(template.get("group_size", "3"))))
-    # V8.18 reference style: heavy uppercase words with a thick black outline.
-    # All words stay bold; the active green/yellow word gets a short size pop
-    # and returns to the base size on the next word.  A tiny 45 ms visual lead
-    # compensates for Whisper/render perception without retiming the audio.
+    # Keep the active word on its measured speech timestamp. A fixed visual
+    # lead made otherwise accurate Whisper captions appear early.
     try:
         normal_fs = max(68, int(round(float(template["fontsize"]))))
     except Exception:
         normal_fs = 72
     active_fs = max(normal_fs + 22, int(round(normal_fs * 1.34)))
-    caption_lead = 0.060
+    caption_lead = 0.0
 
+    # Measure the largest state of each phrase before creating ASS events.
+    # Character counts cannot predict the width of names or wide capitals.
+    try:
+        from PIL import ImageFont  # type: ignore
+        font_path = next(
+            path for path in (
+                "/usr/share/fonts/truetype/lato/Lato-Heavy.ttf",
+                str(BASE_DIR / "master_engine/assets/fonts/ttf/Montserrat-ExtraBold.ttf"),
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            ) if Path(path).exists()
+        )
+        normal_font = ImageFont.truetype(font_path, normal_fs)
+        active_font = ImageFont.truetype(font_path, active_fs)
+        measure = lambda value, active=False: float(
+            (active_font if active else normal_font).getlength(value)
+        )
+    except (ImportError, OSError, StopIteration):
+        measure = lambda value, active=False: len(value) * (
+            active_fs if active else normal_fs
+        ) * 0.68
+
+    safe_width = 750.0  # Conservative across font substitutions in libass.
+    space_width = measure(" ")
+
+    def phrase_width(items: List[ClipperWordTiming]) -> float:
+        labels = [_censor_caption_word(item.text).upper() for item in items]
+        normal = sum(measure(label) for label in labels)
+        active_extra = max(
+            (measure(label, True) - measure(label) for label in labels),
+            default=0.0,
+        )
+        return normal + active_extra + max(0, len(labels) - 1) * space_width
+
+    safe_groups: List[Tuple[int, int]] = []
     for group_start, group_end in _caption_phrase_groups(word_timings, group_size):
+        start = group_start
+        while start < group_end:
+            end = start + 1
+            while end < group_end and phrase_width(word_timings[start:end + 1]) <= safe_width:
+                end += 1
+            safe_groups.append((start, end))
+            start = end
+
+    for group_start, group_end in safe_groups:
         group = word_timings[group_start:group_end]
         if not group:
             continue
@@ -7123,22 +7205,19 @@ def generate_animated_captions(
                 global_index = group_start + local_index
                 is_active = local_index == local_active
                 color = _caption_active_color(template, word.text, global_index) if is_active else primary
-                size_tag = rf"\fs{active_fs}" if is_active else rf"\fs{normal_fs}"
+                font_size = active_fs if is_active else normal_fs
+                shown = _censor_caption_word(word.text).upper()
+                # A single long word cannot be split; shrink only its width.
+                scale = min(
+                    100,
+                    max(50, int(100 * safe_width / max(1.0, measure(shown, is_active))))
+                ) if len(group) == 1 else 100
+                size_tag = rf"\fs{font_size}\fscx{scale}"
                 # Reference uses a heavy face for every word; colour/size is the
                 # animation, not a bold/non-bold toggle.
                 weight = r"\b1"
-                shown = _censor_caption_word(word.text).upper()
                 parts.append(r"{\c" + color + weight + size_tag + r"}" + _clipper_ass_escape(shown))
             line = " ".join(parts)
-            # 1080x1920 safe-title area: keep large captions inside the visible frame.
-            # Two-word groups plus fixed margins prevent long phrases from clipping.
-            visible_phrase = " ".join(_censor_caption_word(w.text) for w in group)
-            if len(parts) == 2 and len(visible_phrase) > 12:
-                line = parts[0] + r"\N" + parts[1]
-            elif len(parts) == 1 and len(visible_phrase) > 11:
-                # Preserve caption height/size while squeezing only the rare very
-                # long single token horizontally into the safe-title area.
-                line = r"{\fscx82}" + line
             events.append(
                 f"Dialogue: 0,{_ass_time(event_start)},{_ass_time(event_end)},Caption,,0,0,0,,{line}"
             )
@@ -10807,21 +10886,9 @@ def build_quality_choices(
     choices: Dict[str, QualityChoice] = {}
 
     audio_formats = [fmt for fmt in formats if is_audio_only(fmt)]
-    aac_audio = [
-        fmt
-        for fmt in audio_formats
-        if is_aac(fmt)
-        and str(fmt.get("ext") or "").lower() in {"m4a", "mp4"}
-    ]
-
     best_audio_any = (
         max(audio_formats, key=audio_score)
         if audio_formats
-        else None
-    )
-    best_audio_aac = (
-        max(aac_audio, key=audio_score)
-        if aac_audio
         else None
     )
 
@@ -10836,12 +10903,15 @@ def build_quality_choices(
         if not exact:
             continue
 
+        # A Premium-labelled stream can appear in metadata even when the
+        # bot has no account entitled to download it.
         available = [
             fmt for fmt in exact
             if "premium" not in str(fmt.get("format_note") or "").lower()
         ] or exact
 
-        # Choose the strongest source stream at the requested resolution.
+        # Do not prefer a smaller H.264/progressive stream over a better
+        # stream at the quality the user selected. Remuxing does not reencode.
         video = best_video_within_telegram_limit(available, duration)
         if video.get("acodec") not in (None, "none"):
             selected = [video]
@@ -10985,18 +11055,6 @@ def format_fallbacks(
         ),
         (
             f"bestvideo[height={height}]+bestaudio/best[height={height}]",
-            "mkv",
-            False,
-        ),
-        (
-            f"bestvideo[height={height}][ext=mp4][vcodec^=avc1]"
-            f"+bestaudio[ext=m4a]/best[height={height}][ext=mp4]",
-            "mp4",
-            True,
-        ),
-        (
-            f"bestvideo[height={height}]+bestaudio/"
-            f"best[height={height}]",
             "mkv",
             False,
         ),
@@ -14202,15 +14260,22 @@ async def send_video_with_fallback(
             return "document"
 
 
-def split_video_for_telegram(path: Path, max_bytes: int, cancel_event: threading.Event) -> Tuple[List[Path], Optional[Path]]:
+def split_video_for_telegram(
+    path: Path,
+    max_bytes: int,
+    cancel_event: threading.Event,
+) -> Tuple[List[Path], Optional[Path]]:
     """Cut an oversized video at keyframes without changing its quality."""
     if path.stat().st_size <= max_bytes:
         return [path], None
+
     duration = float(probe_media(path).get("duration") or 0)
     if duration <= 0:
         raise RuntimeError("Cannot split this video because its duration is unknown")
+
     output_dir = Path(tempfile.mkdtemp(prefix="telegram_parts_", dir=path.parent))
     suffix = path.suffix.lower() if path.suffix.lower() in {".mp4", ".mkv", ".webm"} else ".mkv"
+    # Leave room for bitrate variation and Telegram's exact byte limit.
     segment_seconds = max(1, int(duration * max_bytes * 0.75 / path.stat().st_size))
     try:
         for attempt in range(10):
@@ -14253,9 +14318,6 @@ def split_video_for_telegram(path: Path, max_bytes: int, cancel_event: threading
     except Exception:
         shutil.rmtree(output_dir, ignore_errors=True)
         raise
-
-
-
 
 
 def triple_quality_check(
@@ -19575,7 +19637,6 @@ async def handle_youtube_callback(
                 query.message, "This quality is no longer available."
             )
             return
-
         await progress(f"Your {label} download is queued...")
         file_path, error = await download_video(
             job, choice, progress, cancel_event
@@ -20397,7 +20458,18 @@ async def handle_auto_clipper_callback(
                 raise RuntimeError(
                     "No unique clip ranges remained after duplicate filtering"
                 )
-            clip_plan = sorted(clip_plan, key=lambda item: item[0].score, reverse=True)[:10]
+            if analysis_mode == "quick":
+                clip_plan = sorted(
+                    clip_plan,
+                    key=lambda item: _clip_range_editorial_score(
+                        item[0], paragraphs, item[2], item[3]
+                    ),
+                    reverse=True,
+                )[:10]
+            else:
+                clip_plan = sorted(
+                    clip_plan, key=lambda item: item[0].score, reverse=True
+                )[:10]
 
             total_outputs = len(clip_plan)
 
@@ -20449,21 +20521,32 @@ async def handle_auto_clipper_callback(
                     f"🎨 Captions: {CAPTION_TEMPLATES[caption_template]['label']}"
                 )
 
-                await progress(
-                    f"🎙 Preparing exact word-sync captions "
-                    f"for clip {output_number}/{total_outputs}..."
-                )
-                clip_word_timings, word_temp_files, word_timing_note = (
-                    await asyncio.to_thread(
-                        transcribe_clip_word_timings,
-                        source_path,
-                        clip_start,
-                        clip_end,
-                        paragraphs,
-                        cancel_event,
+                clip_word_timings: List[ClipperWordTiming] = []
+                if caption_template != "none":
+                    await progress(
+                        f"🎙 Preparing exact word-sync captions "
+                        f"for clip {output_number}/{total_outputs}..."
                     )
-                )
-                generated_files.extend(word_temp_files)
+                    for timing_attempt in range(2):
+                        clip_word_timings, word_temp_files, word_timing_note = (
+                            await asyncio.to_thread(
+                                transcribe_clip_word_timings,
+                                source_path,
+                                clip_start,
+                                clip_end,
+                                paragraphs,
+                                cancel_event,
+                            )
+                        )
+                        generated_files.extend(word_temp_files)
+                        if word_timing_note == "exact Whisper word timestamps":
+                            break
+                    else:
+                        await progress(
+                            f"Skipping clip {output_number}: accurate word timestamps "
+                            "were unavailable after retry."
+                        )
+                        continue
 
                 await progress(
                     f"👁 Clip {output_number}/{total_outputs}: live speaker/face/body "
@@ -20731,6 +20814,11 @@ async def handle_auto_clipper_callback(
                     except OSError:
                         pass
 
+            if sent_count == 0:
+                raise RuntimeError(
+                    "No clips passed the accuracy checks. Retry the video or "
+                    "choose a different caption template."
+                )
             elapsed = int(time.monotonic() - started_at)
             await safe_edit_message(
                 query.message,
