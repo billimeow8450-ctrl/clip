@@ -501,7 +501,7 @@ YUNET_MODEL_PATH = os.getenv(
 # source: it preserves every real source frame without wasteful frame duplication.
 # Stronger VPSes may explicitly choose 60 in .env.
 SMART_REFRAME_SAMPLE_INTERVAL_SECONDS = min(
-    0.050, max(1.0 / 30.0, float(os.getenv("SMART_REFRAME_SAMPLE_INTERVAL_SECONDS", "0.034")))
+    0.120, max(1.0 / 30.0, float(os.getenv("SMART_REFRAME_SAMPLE_INTERVAL_SECONDS", "0.067")))
 )
 SMART_REFRAME_MAX_SAMPLES = min(
     3600, max(600, int(os.getenv("SMART_REFRAME_MAX_SAMPLES", "3000")))
@@ -522,7 +522,7 @@ SMART_REFRAME_ALLOW_HAAR_FALLBACK = os.getenv(
 # V5.6: detector reacquisition runs much more often than the older 8fps pass.
 # Dense camera motion still comes from optical flow, so this improves identity
 # lock without making every 30fps frame pay for a full face detector.
-SMART_REFRAME_DETECTOR_FPS = min(18.0, max(8.0, float(os.getenv("SMART_REFRAME_DETECTOR_FPS", "18"))))
+SMART_REFRAME_DETECTOR_FPS = min(18.0, max(4.0, float(os.getenv("SMART_REFRAME_DETECTOR_FPS", "8"))))
 SMART_REFRAME_FLOW_MAX_MISS_SECONDS = min(2.5, max(0.45, float(os.getenv("SMART_REFRAME_FLOW_MAX_MISS_SECONDS", "0.80"))))
 SMART_REFRAME_NO_FACE_PREDICT_SECONDS = min(0.75, max(0.12, float(os.getenv("SMART_REFRAME_NO_FACE_PREDICT_SECONDS", "0.36"))))
 SMART_REFRAME_VIRTUAL_CENTER_MARGIN = min(0.34, max(0.10, float(os.getenv("SMART_REFRAME_VIRTUAL_CENTER_MARGIN", "0.28"))))
@@ -4973,7 +4973,7 @@ def analyze_smart_reframe_plan(
     source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0) or 30.0
     requested_analysis_fps = min(
         source_fps,
-        max(12.0, min(30.0, 1.0 / SMART_REFRAME_SAMPLE_INTERVAL_SECONDS)),
+        max(8.0, min(30.0, 1.0 / SMART_REFRAME_SAMPLE_INTERVAL_SECONDS)),
     )
     frame_step = max(1, int(round(source_fps / max(1.0, requested_analysis_fps))))
     actual_analysis_fps = source_fps / frame_step
@@ -9798,12 +9798,22 @@ def render_auto_clip(
 ) -> Tuple[Path, List[Path], str]:
     ensure_not_cancelled(cancel_event)
     cleanup_files: List[Path] = []
+    render_started = time.monotonic()
+    logger.info(
+        "Auto clip %s: reframe analysis started (%.1fs source range)",
+        clip_index, max(0.0, clip_end - clip_start),
+    )
 
     reframe_plan = analyze_smart_reframe_plan(
         source_path,
         clip_start,
         clip_end,
         cancel_event,
+    )
+    logger.info(
+        "Auto clip %s: reframe analysis finished in %.1fs (%s track points)",
+        clip_index, time.monotonic() - render_started,
+        len(reframe_plan.primary_track or []),
     )
 
     # V8.7 production audit: the primary planner already emits dense verified
@@ -9851,6 +9861,10 @@ def render_auto_clip(
         )
     )
     cleanup_files.extend(ai_cleanup)
+    logger.info(
+        "Auto clip %s: source preparation finished in %.1fs",
+        clip_index, time.monotonic() - render_started,
+    )
 
     working_media = probe_media(working_source)
     width = int(working_media.get("width") or 0)
@@ -9875,6 +9889,10 @@ def render_auto_clip(
             )
         )
     cleanup_files.extend(word_cleanup)
+    logger.info(
+        "Auto clip %s: caption timing ready in %.1fs",
+        clip_index, time.monotonic() - render_started,
+    )
 
     work_id = uuid.uuid4().hex[:10]
     hook_path = DOWNLOAD_DIR / f"clipper_hook_{work_id}.png"
@@ -10073,7 +10091,9 @@ def render_auto_clip(
         "-map", audio_map,
         "-t", f"{duration:.3f}",
         "-c:v", "libx264",
-        "-preset", "slow",
+        # Keep the near-lossless CRF 12 target. Medium spends fewer CPU cycles
+        # than slow, at the cost of somewhat larger output files.
+        "-preset", "medium",
         "-crf", "12",
         "-profile:v", "high",
         "-pix_fmt", "yuv420p",
@@ -10085,6 +10105,10 @@ def render_auto_clip(
         str(output_path),
     ]
 
+    logger.info(
+        "Auto clip %s: final encode started after %.1fs",
+        clip_index, time.monotonic() - render_started,
+    )
     run_process(
         command,
         cancel_event=cancel_event,
@@ -10097,6 +10121,10 @@ def render_auto_clip(
                 max(180, int(duration * 12 + 120)),
             )
         ),
+    )
+    logger.info(
+        "Auto clip %s: final encode finished after %.1fs",
+        clip_index, time.monotonic() - render_started,
     )
 
     if not output_path.exists() or output_path.stat().st_size <= 0:
